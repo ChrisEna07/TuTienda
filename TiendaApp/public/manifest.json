@@ -1,0 +1,16 @@
+{
+  "short_name": "TuTienda",
+  "name": "TuTienda by ChrizDev",
+  "icons": [
+    {
+      "src": "assets/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#1a1a2e",
+  "theme_color": "#6C5CE7",
+  "display": "standalone",
+  "orientation": "portrait"
+}

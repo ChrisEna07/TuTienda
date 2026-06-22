@@ -20,7 +20,7 @@ router.post('/apertura', verificarToken, requiereModulo('apertura'), verificarPe
     const { monto_inicial = 0 } = req.body;
     const abierto = db.prepare("SELECT id FROM aperturas_cierre WHERE (usuario_id = ? OR usuario_id IN (SELECT id FROM empleados WHERE tienda_usuario_id = ?)) AND tipo = 'apertura' AND monto_final IS NULL AND date(created_at) = date('now', '-5 hours') LIMIT 1").get(req.usuario.owner_id, req.usuario.owner_id);
     if (abierto) return res.status(400).json({ error: 'Ya hay una apertura activa para hoy' });
-    const result = db.prepare("INSERT INTO aperturas_cierre (usuario_id, tipo, monto_inicial) VALUES (?, 'apertura', ?)").run(req.usuario.id, monto_inicial);
+    const result = db.prepare("INSERT INTO aperturas_cierre (usuario_id, usuario_nombre, tipo, monto_inicial) VALUES (?, ?, 'apertura', ?)").run(req.usuario.id, req.usuario.nombre, monto_inicial);
     logAction(req.usuario.id, req.usuario.nombre, 'Apertura de caja', 'apertura_cierre', `Monto inicial: $${monto_inicial}`);
     res.json({ id: result.lastInsertRowid, mensaje: 'Caja aperturada correctamente', hora: new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota' }) });
   } catch (err) {
@@ -35,7 +35,7 @@ router.post('/cierre', verificarToken, requiereModulo('apertura'), verificarPerm
     if (!aperturaActiva) return res.status(400).json({ error: 'No hay una apertura activa' });
     const ventasHoy = db.prepare("SELECT COUNT(*) as total_ventas, COALESCE(SUM(total), 0) as total_ingresos FROM ventas WHERE apertura_id = ?").get(aperturaActiva.id);
     db.prepare("UPDATE aperturas_cierre SET monto_final = ?, observaciones = ? WHERE id = ?").run(monto_final || ventasHoy.total_ingresos, observaciones, aperturaActiva.id);
-    db.prepare("INSERT INTO aperturas_cierre (usuario_id, tipo, monto_inicial, observaciones) VALUES (?, 'cierre', ?, ?)").run(req.usuario.id, monto_final || ventasHoy.total_ingresos, 'Cierre automático del día');
+    db.prepare("INSERT INTO aperturas_cierre (usuario_id, usuario_nombre, tipo, monto_inicial, observaciones) VALUES (?, ?, 'cierre', ?, ?)").run(req.usuario.id, req.usuario.nombre, monto_final || ventasHoy.total_ingresos, 'Cierre automático del día');
     logAction(req.usuario.id, req.usuario.nombre, 'Cierre de caja', 'apertura_cierre', `Total ventas: $${ventasHoy.total_ingresos}`);
     res.json({ mensaje: 'Caja cerrada correctamente', resumen: ventasHoy, hora: new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota' }) });
   } catch (err) {
@@ -46,7 +46,7 @@ router.post('/cierre', verificarToken, requiereModulo('apertura'), verificarPerm
 router.get('/historial', verificarToken, requiereModulo('apertura'), (req, res) => {
   const isSuper = req.usuario.tipo === 'superadmin';
   const registros = db.prepare(`
-    SELECT a.*, COALESCE((SELECT nombre FROM usuarios WHERE id = a.usuario_id), (SELECT nombre FROM empleados WHERE id = a.usuario_id)) as usuario_nombre 
+    SELECT a.*, COALESCE(a.usuario_nombre, (SELECT nombre FROM usuarios WHERE id = a.usuario_id), (SELECT nombre FROM empleados WHERE id = a.usuario_id)) as usuario_nombre 
     FROM aperturas_cierre a 
     ${!isSuper ? 'WHERE a.usuario_id = ? OR a.usuario_id IN (SELECT id FROM empleados WHERE tienda_usuario_id = ?)' : ''} 
     ORDER BY a.created_at DESC 

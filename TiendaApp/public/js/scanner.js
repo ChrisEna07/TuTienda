@@ -1,7 +1,7 @@
 let scannerStream = null;
 let scannerActive = false;
 
-function escanearCodigo(onDetect) {
+function escanearCodigo(onDetect, facingMode = 'environment') {
   if (scannerActive) { cerrarEscanner(); return; }
   if (!navigator.mediaDevices?.getUserMedia) {
     Swal.fire({ icon: 'error', title: 'Camara no disponible', text: 'Tu navegador no soporta el acceso a camara.' });
@@ -11,22 +11,29 @@ function escanearCodigo(onDetect) {
   const container = document.createElement('div');
   container.id = 'scannerContainer';
   container.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:9999;background:rgba(0,0,0,0.9);display:flex;flex-direction:column;align-items:center;justify-content:center';
+  
+  const transformStyle = facingMode === 'environment' ? 'transform: none' : 'transform: scaleX(-1)';
+  
   container.innerHTML = `
     <div style="position:relative;width:100%;max-width:500px">
-      <video id="scannerVideo" autoplay playsinline style="width:100%;border-radius:12px;background:#000;transform:scaleX(-1)"></video>
+      <video id="scannerVideo" autoplay playsinline style="width:100%;border-radius:12px;background:#000;${transformStyle}"></video>
       <div id="scannerOverlay" style="position:absolute;top:0;left:0;right:0;bottom:0;border:3px solid rgba(108,92,231,0.5);border-radius:12px;box-shadow:inset 0 0 30px rgba(108,92,231,0.2);pointer-events:none">
         <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:70%;height:4px;background:linear-gradient(90deg,transparent,var(--primary),transparent);animation:scannerLine 2s ease-in-out infinite;border-radius:2px"></div>
       </div>
       <p style="color:rgba(255,255,255,0.6);text-align:center;margin-top:12px;font-size:14px"><i class="fas fa-camera"></i> Enfoca el codigo de barras...</p>
       <div style="display:flex;gap:10px;justify-content:center;margin-top:12px">
+        <button class="btn btn-secondary" onclick="alternarCamara()"><i class="fas fa-sync"></i> Alternar Cámara</button>
         <button class="btn btn-danger" onclick="cerrarEscanner()"><i class="fas fa-times"></i> Cancelar</button>
       </div>
     </div>
   `;
   document.body.appendChild(container);
+  
+  window._currentFacingMode = facingMode;
+  window._scannerDetectCallback = onDetect;
 
   try {
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { min: 640, ideal: 1280 }, height: { min: 480, ideal: 720 } } })
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: facingMode, width: { min: 640, ideal: 1280 }, height: { min: 480, ideal: 720 } } })
       .then(stream => {
         scannerStream = stream;
         const video = document.getElementById('scannerVideo');
@@ -34,7 +41,7 @@ function escanearCodigo(onDetect) {
         video.play();
 
         if ('BarcodeDetector' in window) {
-          const detector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e'] });
+          const detector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'code_93', 'itf'] });
           const interval = setInterval(() => {
             if (!scannerActive) { clearInterval(interval); return; }
             detector.detect(video).then(codes => {
@@ -47,7 +54,7 @@ function escanearCodigo(onDetect) {
           }, 500);
           container._detectInterval = interval;
         } else {
-          loadHtml5QrCode(video, onDetect);
+          loadHtml5QrCode(video, onDetect, facingMode);
         }
       })
       .catch(err => {
@@ -64,7 +71,16 @@ function escanearCodigo(onDetect) {
   }
 }
 
-function loadHtml5QrCode(video, onDetect) {
+function alternarCamara() {
+  const newMode = window._currentFacingMode === 'environment' ? 'user' : 'environment';
+  const callback = window._scannerDetectCallback;
+  stopScanner();
+  setTimeout(() => {
+    escanearCodigo(callback, newMode);
+  }, 300);
+}
+
+function loadHtml5QrCode(video, onDetect, facingMode = 'environment') {
   const script = document.createElement('script');
   script.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
   script.onload = () => {
@@ -74,8 +90,25 @@ function loadHtml5QrCode(video, onDetect) {
     document.body.appendChild(qrContainer);
     const html5QrCode = new Html5Qrcode('html5qr');
     html5QrCode.start(
-      { facingMode: 'environment' },
-      { fps: 10, qrbox: { width: 250, height: 150 }, formatsToSupport: [ Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39 ] },
+      { facingMode: facingMode },
+      { 
+        fps: 15, 
+        qrbox: (width, height) => {
+          const widthBox = Math.max(50, Math.min(width * 0.85, 360));
+          const heightBox = Math.max(50, Math.min(height * 0.45, 160));
+          return { width: widthBox, height: heightBox };
+        }, 
+        formatsToSupport: [ 
+          Html5QrcodeSupportedFormats.EAN_13, 
+          Html5QrcodeSupportedFormats.EAN_8, 
+          Html5QrcodeSupportedFormats.CODE_128, 
+          Html5QrcodeSupportedFormats.CODE_39,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.UPC_E,
+          Html5QrcodeSupportedFormats.CODE_93,
+          Html5QrcodeSupportedFormats.ITF
+        ] 
+      },
       decodedText => {
         stopScanner();
         if (onDetect) onDetect(decodedText);

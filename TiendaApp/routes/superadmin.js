@@ -151,12 +151,34 @@ router.put('/clientes/:id/suscripcion', verificarToken, soloSuperAdmin, (req, re
     if (!oferta_id) return res.status(400).json({ error: 'Oferta requerida' });
     const oferta = db.prepare("SELECT * FROM ofertas_software WHERE id = ? AND activo = 1").get(oferta_id);
     if (!oferta) return res.status(404).json({ error: 'Oferta no encontrada' });
-    const fechaInicio = new Date().toISOString().replace('T', ' ').substring(0, 19);
-    const fechaFin = new Date(Date.now() + oferta.duracion_dias * 86400000).toISOString().replace('T', ' ').substring(0, 19);
-    db.prepare("UPDATE suscripciones SET estado = 'expirada' WHERE usuario_id = ? AND estado = 'activa'").run(req.params.id);
-    const result = db.prepare("INSERT INTO suscripciones (usuario_id, oferta_id, fecha_inicio, fecha_fin) VALUES (?, ?, ?, ?)").run(req.params.id, oferta_id, fechaInicio, fechaFin);
-    logAction(req.usuario.id, req.usuario.nombre, 'Cambiar plan suscripcion', 'superadmin', `Cliente ID: ${req.params.id}, Oferta: ${oferta.nombre}`);
-    res.json({ id: result.lastInsertRowid, mensaje: `Plan cambiado a ${oferta.nombre}`, fecha_fin: fechaFin });
+
+    const activeSub = db.prepare("SELECT * FROM suscripciones WHERE usuario_id = ? AND estado = 'activa' ORDER BY id DESC LIMIT 1").get(req.params.id);
+    let fechaInicio;
+    let fechaFin;
+
+    if (activeSub && activeSub.oferta_id === parseInt(oferta_id)) {
+      // Extend existing subscription
+      fechaInicio = activeSub.fecha_inicio;
+      const currentFin = new Date(activeSub.fecha_fin.replace(' ', 'T') + 'Z');
+      const now = new Date();
+      const startBase = currentFin > now ? currentFin : now;
+      fechaFin = new Date(startBase.getTime() + oferta.duracion_dias * 86400000).toISOString().replace('T', ' ').substring(0, 19);
+      
+      db.prepare("UPDATE suscripciones SET fecha_fin = ? WHERE id = ?").run(fechaFin, activeSub.id);
+      logAction(req.usuario.id, req.usuario.nombre, 'Extender plan suscripcion', 'superadmin', `Cliente ID: ${req.params.id}, Oferta: ${oferta.nombre}, Nuevo Fin: ${fechaFin}`);
+      
+      res.json({ id: activeSub.id, mensaje: `Suscripcion de ${oferta.nombre} extendida correctamente`, fecha_fin: fechaFin });
+    } else {
+      // Create new subscription / Change plan
+      fechaInicio = new Date().toISOString().replace('T', ' ').substring(0, 19);
+      fechaFin = new Date(Date.now() + oferta.duracion_dias * 86400000).toISOString().replace('T', ' ').substring(0, 19);
+      
+      db.prepare("UPDATE suscripciones SET estado = 'expirada' WHERE usuario_id = ? AND estado = 'activa'").run(req.params.id);
+      const result = db.prepare("INSERT INTO suscripciones (usuario_id, oferta_id, fecha_inicio, fecha_fin) VALUES (?, ?, ?, ?)").run(req.params.id, oferta_id, fechaInicio, fechaFin);
+      logAction(req.usuario.id, req.usuario.nombre, 'Cambiar plan suscripcion', 'superadmin', `Cliente ID: ${req.params.id}, Oferta: ${oferta.nombre}`);
+      
+      res.json({ id: result.lastInsertRowid, mensaje: `Plan cambiado a ${oferta.nombre}`, fecha_fin: fechaFin });
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

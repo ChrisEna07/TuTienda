@@ -127,6 +127,7 @@ router.get('/verificar', verificarToken, (req, res) => {
         if (diasRestantes < 0) diasRestantes = 0;
         tipoCuenta = diasRestantes > 0 ? 'trial' : 'expirado';
         estadoSuscripcion = diasRestantes > 0 ? 'trial' : 'expirado';
+        suscripcionModulos = ['dashboard', 'inventario', 'ventas', 'apertura', 'empleados', 'proveedores', 'logs', 'config', 'api'];
       } else {
         tipoCuenta = 'sin_plan';
         estadoSuscripcion = 'inactivo';

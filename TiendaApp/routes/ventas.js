@@ -78,9 +78,12 @@ router.post('/', verificarToken, verificarPermiso('ventas'), (req, res) => {
       detalles.push({ producto_id: item.producto_id, cantidad: item.cantidad, precio_unitario: producto.precio_venta, subtotal, nombre: producto.nombre });
     }
 
-    const aperturaActiva = db.prepare('SELECT id FROM aperturas_cierre WHERE id = ? AND tipo = ? AND monto_final IS NULL').get(apertura_id, 'apertura');
+    const activeAp = db.prepare("SELECT id FROM aperturas_cierre WHERE (usuario_id = ? OR usuario_id IN (SELECT id FROM empleados WHERE tienda_usuario_id = ?)) AND tipo = 'apertura' AND monto_final IS NULL AND date(created_at) = date('now', '-5 hours') ORDER BY id DESC LIMIT 1").get(req.usuario.owner_id, req.usuario.owner_id);
+    if (!activeAp) {
+      return res.status(400).json({ error: 'Debes realizar la apertura de caja antes de registrar una venta', codigo: 'CAJA_CERRADA' });
+    }
 
-    const result = db.prepare('INSERT INTO ventas (usuario_id, total, metodo_pago, apertura_id) VALUES (?, ?, ?, ?)').run(req.usuario.id, total, metodo_pago, aperturaActiva?.id || null);
+    const result = db.prepare('INSERT INTO ventas (usuario_id, total, metodo_pago, apertura_id) VALUES (?, ?, ?, ?)').run(req.usuario.id, total, metodo_pago, activeAp.id);
     const ventaId = result.lastInsertRowid;
 
     const insertDetalle = db.prepare('INSERT INTO ventas_detalle (venta_id, producto_id, cantidad, precio_unitario, subtotal) VALUES (?, ?, ?, ?, ?)');

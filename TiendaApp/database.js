@@ -130,6 +130,7 @@ function initializeDatabase() {
     CREATE TABLE IF NOT EXISTS aperturas_cierre (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       usuario_id INTEGER NOT NULL,
+      usuario_nombre TEXT,
       tipo TEXT NOT NULL CHECK(tipo IN ('apertura','cierre')),
       monto_inicial REAL DEFAULT 0,
       monto_final REAL,
@@ -210,6 +211,7 @@ function initializeDatabase() {
   `);
 
   try { db.exec("ALTER TABLE usuarios ADD COLUMN telefono TEXT"); } catch (e) {}
+  try { db.exec("ALTER TABLE aperturas_cierre ADD COLUMN usuario_nombre TEXT"); } catch (e) {}
   try { db.exec("ALTER TABLE configuracion ADD COLUMN usuario_id INTEGER"); } catch (e) {}
   try { db.exec("ALTER TABLE proveedores ADD COLUMN usuario_id INTEGER"); } catch (e) {}
   try { db.exec("ALTER TABLE categorias ADD COLUMN usuario_id INTEGER"); } catch (e) {}
@@ -224,6 +226,40 @@ function initializeDatabase() {
   try { db.exec("UPDATE ofertas_software SET mostrar_landing = 0 WHERE mostrar_landing IS NULL OR mostrar_landing = 1"); } catch (e) {}
   try { db.exec("ALTER TABLE logs ADD COLUMN tienda_id INTEGER"); } catch (e) {}
   try { db.exec("UPDATE logs SET tienda_id = usuario_id WHERE tienda_id IS NULL"); } catch (e) {}
+  try { db.exec("ALTER TABLE movimientos_inventario ADD COLUMN precio_compra REAL DEFAULT 0"); } catch (e) {}
+  try { db.exec("ALTER TABLE movimientos_inventario ADD COLUMN proveedor_id INTEGER"); } catch (e) {}
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS devoluciones_proveedor (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        usuario_id INTEGER NOT NULL,
+        producto_id INTEGER NOT NULL,
+        proveedor_id INTEGER NOT NULL,
+        cantidad INTEGER NOT NULL,
+        precio_compra REAL,
+        motivo TEXT NOT NULL,
+        estado TEXT DEFAULT 'pendiente',
+        created_at DATETIME DEFAULT (datetime('now', '-5 hours')),
+        FOREIGN KEY (producto_id) REFERENCES productos(id),
+        FOREIGN KEY (proveedor_id) REFERENCES proveedores(id),
+        FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+      )
+    `);
+  } catch (e) {}
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS visitas_proveedores (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        usuario_id INTEGER NOT NULL,
+        proveedor_id INTEGER NOT NULL,
+        fecha_visita DATE NOT NULL,
+        notas TEXT,
+        created_at DATETIME DEFAULT (datetime('now', '-5 hours')),
+        FOREIGN KEY (proveedor_id) REFERENCES proveedores(id),
+        FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+      )
+    `);
+  } catch (e) {}
 
   const rolCount = db.prepare('SELECT COUNT(*) as count FROM roles').get();
   if (rolCount.count === 0) {
@@ -248,6 +284,59 @@ function initializeDatabase() {
     db.prepare('INSERT INTO configuracion (usuario_id, clave, valor) VALUES (?, ?, ?)').run(superId, 'tienda_logo', '');
     db.prepare('INSERT INTO configuracion (usuario_id, clave, valor) VALUES (?, ?, ?)').run(superId, 'moneda', 'COP');
     db.prepare('INSERT INTO configuracion (usuario_id, clave, valor) VALUES (?, ?, ?)').run(superId, 'impuesto', '19');
+  }
+
+  // --- SEED SOFTWARE PLANS ---
+  const plansToSeed = [
+    {
+      nombre: 'Plan Inicial',
+      descripcion: 'Plan basico para tiendas pequenas. Gestion de inventario y ventas. Sin empleados.',
+      precio: 350000,
+      precio_mensual: 60000,
+      duracion_dias: 30,
+      tipo_pago: 'mensual',
+      caracteristicas: JSON.stringify(['inventario', 'ventas', 'apertura']),
+      activo: 1,
+      mostrar_landing: 1
+    },
+    {
+      nombre: 'Plan Minimarket',
+      descripcion: 'Incluye codigo de barras, integracion de empleados y personalizacion de marca.',
+      precio: 400000,
+      precio_mensual: 120000,
+      duracion_dias: 30,
+      tipo_pago: 'mensual',
+      caracteristicas: JSON.stringify(['inventario', 'ventas', 'apertura', 'api', 'empleados', 'config', 'proveedores', 'logs']),
+      activo: 1,
+      mostrar_landing: 1
+    },
+    {
+      nombre: 'Plan SuperMarket',
+      descripcion: 'Acceso total a todos los modulos (excepto lo de superadmin): control de caja, auditoria, integraciones y mas.',
+      precio: 450000,
+      precio_mensual: 180000,
+      duracion_dias: 30,
+      tipo_pago: 'mensual',
+      caracteristicas: JSON.stringify(['inventario', 'ventas', 'apertura', 'empleados', 'proveedores', 'logs', 'config', 'api']),
+      activo: 1,
+      mostrar_landing: 1
+    }
+  ];
+
+  for (const plan of plansToSeed) {
+    const exist = db.prepare('SELECT id FROM ofertas_software WHERE nombre = ?').get(plan.nombre);
+    if (!exist) {
+      db.prepare(`
+        INSERT INTO ofertas_software (nombre, descripcion, precio, precio_mensual, duracion_dias, tipo_pago, caracteristicas, activo, mostrar_landing)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(plan.nombre, plan.descripcion, plan.precio, plan.precio_mensual, plan.duracion_dias, plan.tipo_pago, plan.caracteristicas, plan.activo, plan.mostrar_landing);
+    } else {
+      db.prepare(`
+        UPDATE ofertas_software
+        SET descripcion = ?, precio = ?, precio_mensual = ?, duracion_dias = ?, tipo_pago = ?, caracteristicas = ?, activo = ?, mostrar_landing = ?
+        WHERE id = ?
+      `).run(plan.descripcion, plan.precio, plan.precio_mensual, plan.duracion_dias, plan.tipo_pago, plan.caracteristicas, plan.activo, plan.mostrar_landing, exist.id);
+    }
   }
 }
 

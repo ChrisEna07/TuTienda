@@ -63,8 +63,33 @@ async function request(url, opts = {}) {
   const res = await fetch(API + url, { ...opts, headers });
   const data = await res.json();
   if (!res.ok && res.status === 401) { TOKEN = null; localStorage.removeItem('token'); mostrarLanding(); throw new Error(data.error); }
-  if (!res.ok) throw new Error(data.error || 'Error del servidor');
+  if (!res.ok) {
+    if (data.error && (data.error.includes('expirado') || data.error.includes('expirada') || data.error.includes('suscripcion') || data.error.includes('suscripción') || data.codigo === 'TRIAL_EXPIRADO')) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'Periodo de prueba finalizado',
+        text: 'Tu periodo de prueba o suscripción ha terminado. Por favor, selecciona un paquete de suscripción para seguir disfrutando del servicio.',
+        confirmButtonText: 'Ver Planes y Precios',
+        allowOutsideClick: false,
+        allowEscapeKey: false
+      }).then(() => {
+        cerrarSesionExpirada();
+      });
+    }
+    throw new Error(data.error || 'Error del servidor');
+  }
   return data;
+}
+
+function cerrarSesionExpirada() {
+  TOKEN = null;
+  USUARIO = null;
+  localStorage.removeItem('token');
+  document.getElementById('appLayout').classList.remove('active');
+  mostrarLanding();
+  setTimeout(() => {
+    document.getElementById('pricingSection')?.scrollIntoView({ behavior: 'smooth' });
+  }, 500);
 }
 
 document.getElementById('loginForm').addEventListener('submit', async (e) => {
@@ -226,9 +251,10 @@ function cargarSidebar() {
   const permisos = USUARIO.permisos || [];
   const esSuperAdmin = USUARIO.tipo === 'superadmin';
   const esCliente = USUARIO.tipo === 'cliente';
+  const esEmpleado = USUARIO.tipo === 'empleado';
   const suscripcionModulos = USUARIO.suscripcion_modulos || [];
   const tienePermiso = (p) => permisos.includes('*') || permisos.includes(p);
-  const modSuscripto = (mid) => !esCliente || suscripcionModulos.length === 0 || suscripcionModulos.includes(mid);
+  const modSuscripto = (mid) => esSuperAdmin || (suscripcionModulos && suscripcionModulos.includes(mid));
 
   const modulos = [
     { id: 'dashboard', icono: 'chart-pie', label: 'Dashboard', permiso: true },
@@ -264,8 +290,14 @@ function cargarSidebar() {
 function toggleSidebar() {
   const sidebar = document.getElementById('sidebar');
   const main = document.getElementById('mainContent');
-  sidebar.classList.toggle('collapsed');
-  if (main) main.classList.toggle('expanded');
+  const backdrop = document.getElementById('sidebarBackdrop');
+  if (window.innerWidth <= 768) {
+    const isOpen = sidebar.classList.toggle('open');
+    if (backdrop) backdrop.style.display = isOpen ? 'block' : 'none';
+  } else {
+    sidebar.classList.toggle('collapsed');
+    if (main) main.classList.toggle('expanded');
+  }
 }
 
 async function cargarConfig() {
@@ -314,18 +346,70 @@ async function verificarTrial() {
       document.getElementById('trialText').textContent = tipo_cuenta === 'expirado'
         ? 'Tu prueba ha expirado. Adquiere una licencia para continuar.'
         : 'Sin plan activo. Contacta al soporte.';
+      
+      Swal.fire({
+        icon: 'warning',
+        title: 'Periodo de prueba finalizado',
+        text: 'Tu periodo de prueba o suscripción ha terminado. Por favor, selecciona un paquete de suscripción para seguir disfrutando del servicio.',
+        confirmButtonText: 'Ver Planes y Precios',
+        allowOutsideClick: false,
+        allowEscapeKey: false
+      }).then(() => {
+        cerrarSesionExpirada();
+      });
     }
   } catch {}
 }
 
 // ================ NAVEGACION DE MODULOS ================
-async function cargarModulo(modulo) {
+async function cargarModulo(modulo, keepFilter = false) {
+  if (window.innerWidth <= 768) {
+    document.getElementById('sidebar')?.classList.remove('open');
+    const backdrop = document.getElementById('sidebarBackdrop');
+    if (backdrop) backdrop.style.display = 'none';
+  }
+  if (!keepFilter) {
+    window._invFilterType = null;
+  }
+  
+  const titulos = { dashboard: 'Dashboard', inventario: 'Inventario', ventas: 'Ventas', empleados: 'Empleados & Roles', proveedores: 'Proveedores', apertura: 'Apertura / Cierre de Caja', logs: 'Logs & Auditoria', config: 'Configuracion', superadmin: 'Panel Super Admin', api: 'Integracion de APIs' };
+  
+  const permisos = USUARIO.permisos || [];
+  const esSuperAdmin = USUARIO.tipo === 'superadmin';
+  const suscripcionModulos = USUARIO.suscripcion_modulos || [];
+  const tienePermiso = (p) => permisos.includes('*') || permisos.includes(p);
+  const modSuscripto = (mid) => esSuperAdmin || (suscripcionModulos && suscripcionModulos.includes(mid));
+
+  const moduloPermisos = {
+    dashboard: true,
+    superadmin: esSuperAdmin,
+    inventario: modSuscripto('inventario') && (tienePermiso('inventario') || tienePermiso('inventario_ver')),
+    ventas: modSuscripto('ventas') && (tienePermiso('ventas') || tienePermiso('ventas_ver')),
+    apertura: modSuscripto('apertura') && tienePermiso('apertura_cierre'),
+    empleados: modSuscripto('empleados') && tienePermiso('empleados'),
+    proveedores: modSuscripto('proveedores') && tienePermiso('proveedores'),
+    logs: modSuscripto('logs') && tienePermiso('logs'),
+    config: modSuscripto('config') && tienePermiso('configuracion'),
+    api: modSuscripto('api') && tienePermiso('api_integracion')
+  };
+
+  if (modulo !== 'dashboard' && !moduloPermisos[modulo]) {
+    Swal.fire({
+      icon: 'warning',
+      title: 'Acceso Restringido',
+      text: 'Tu plan contratado o tus permisos no incluyen el acceso al módulo de ' + (titulos[modulo] || modulo) + '.',
+      confirmButtonText: 'Volver a Dashboard'
+    }).then(() => {
+      cargarModulo('dashboard');
+    });
+    return;
+  }
+
   currentModule = modulo;
   document.querySelectorAll('.module-page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.querySelector(`.nav-item[onclick*="'${modulo}'"]`)?.classList.add('active');
 
-  const titulos = { dashboard: 'Dashboard', inventario: 'Inventario', ventas: 'Ventas', empleados: 'Empleados & Roles', proveedores: 'Proveedores', apertura: 'Apertura / Cierre de Caja', logs: 'Logs & Auditoria', config: 'Configuracion', superadmin: 'Panel Super Admin', api: 'Integracion de APIs' };
   document.getElementById('pageTitle').textContent = titulos[modulo] || modulo;
 
   const moduleMap = { dashboard:'moduleDashboard', inventario:'moduleInventario', ventas:'moduleVentas', empleados:'moduleEmpleados', proveedores:'moduleProveedores', apertura:'moduleApertura', logs:'moduleLogs', config:'moduleConfig', superadmin:'moduleSuperAdmin', api:'moduleApi' };
@@ -366,31 +450,32 @@ async function renderDashboard() {
   container.innerHTML = '<div class="text-center" style="padding:60px;display:flex;flex-direction:column;align-items:center;justify-content:center"><div class="loader-ripple"><div></div><div></div></div><p class="mt-20 text-muted">Cargando dashboard...</p></div>';
   try {
     const data = await request('/dashboard');
+    actualizarNotificaciones(data);
 
     const formatPeso = n => '$' + Number(n).toLocaleString('es-CO');
     const formatNum = n => Number(n).toLocaleString('es-CO');
 
     container.innerHTML = `
       <div class="stats-grid">
-        <div class="stat-card animate-slideInUp stagger-1">
+        <div class="stat-card animate-slideInUp stagger-1" onclick="window._invFilterType = ${data.productosBajoStock > 0 ? "'bajo_stock'" : 'null'}; cargarModulo('inventario', true)">
           <div class="stat-icon" style="background:rgba(108,92,231,0.1);color:var(--primary)"><i class="fas fa-box"></i></div>
           <div class="stat-value">${formatNum(data.totalProductos)}</div>
           <div class="stat-label">Productos</div>
           ${data.productosBajoStock > 0 ? `<div class="stat-change down"><i class="fas fa-exclamation-triangle"></i> ${data.productosBajoStock} bajo stock</div>` : ''}
         </div>
-        <div class="stat-card animate-slideInUp stagger-2">
+        <div class="stat-card animate-slideInUp stagger-2" onclick="cargarModulo('ventas')">
           <div class="stat-icon" style="background:rgba(0,206,201,0.1);color:var(--secondary)"><i class="fas fa-shopping-cart"></i></div>
           <div class="stat-value">${formatNum(data.ventasHoy.total)}</div>
           <div class="stat-label">Ventas Hoy</div>
           <div class="stat-change up"><i class="fas fa-arrow-up"></i> ${formatPeso(data.ventasHoy.ingresos)}</div>
         </div>
-        <div class="stat-card animate-slideInUp stagger-3">
+        <div class="stat-card animate-slideInUp stagger-3" onclick="cargarModulo('ventas')">
           <div class="stat-icon" style="background:rgba(253,203,110,0.2);color:#B7950B"><i class="fas fa-chart-line"></i></div>
           <div class="stat-value">${formatPeso(data.ingresoTotal)}</div>
           <div class="stat-label">Ingresos Totales</div>
           <div class="stat-change ${data.margenGanancia > 0 ? 'up' : 'down'}"><i class="fas fa-percentage"></i> ${data.margenGanancia}% margen</div>
         </div>
-        <div class="stat-card animate-slideInUp stagger-4">
+        <div class="stat-card animate-slideInUp stagger-4" onclick="window._invFilterType = ${data.productosPorVencer > 0 ? "'por_vencer'" : 'null'}; cargarModulo('inventario', true)">
           <div class="stat-icon" style="background:rgba(225,112,85,0.1);color:var(--danger)"><i class="fas fa-clock"></i></div>
           <div class="stat-value">${data.productosPorVencer}</div>
           <div class="stat-label">Por Vencer (30 dias)</div>
@@ -482,38 +567,587 @@ async function renderInventario() {
     const [productos, categorias, proveedores] = await Promise.all([
       request('/inventario'), request('/categorias'), request('/proveedores')
     ]);
-    container.innerHTML = `
-      <div class="search-bar" style="margin-bottom:16px">
-        <input type="text" id="searchInventario" placeholder="Buscar producto..." oninput="filtrarInventario()">
-        <select id="filtroCategoria" onchange="filtrarInventario()"><option value="">Todas las categorias</option>
-          ${categorias.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('')}
-        </select>
-        <select id="filtroProveedor" onchange="filtrarInventario()"><option value="">Todos los proveedores</option>
-          ${proveedores.map(p => `<option value="${p.id}">${p.nombre_empresa}</option>`).join('')}
-        </select>
-        <button class="btn btn-primary" onclick="mostrarFormProducto()"><i class="fas fa-plus"></i> Producto</button>
-        <button class="btn btn-secondary" onclick="mostrarFormCategoria()"><i class="fas fa-tag"></i> Categoria</button>
+    window._invProductos = productos;
+    window._invCategorias = categorias;
+    window._invProveedores = proveedores;
+
+    if (!window._activeInventarioTab) window._activeInventarioTab = 'productos';
+
+    renderInventarioTabsStructure();
+  } catch (err) {
+    container.innerHTML = `<div class="empty-state"><h3>Error</h3><p>${err.message}</p></div>`;
+  }
+}
+
+function renderInventarioTabsStructure() {
+  const container = document.getElementById('moduleInventario');
+  const activeTab = window._activeInventarioTab;
+  
+  container.innerHTML = `
+    <div class="auth-tabs" style="margin-bottom: 20px; display: flex; gap: 4px; background: rgba(0,0,0,0.05); padding: 4px; border-radius: var(--radius-md);">
+      <button class="auth-tab ${activeTab === 'productos' ? 'active' : ''}" style="flex:1" onclick="cambiarTabInventario('productos')">
+        <i class="fas fa-box"></i> Productos
+      </button>
+      <button class="auth-tab ${activeTab === 'devoluciones' ? 'active' : ''}" style="flex:1" onclick="cambiarTabInventario('devoluciones')">
+        <i class="fas fa-undo"></i> Devoluciones Proveedor
+      </button>
+      <button class="auth-tab ${activeTab === 'calendario' ? 'active' : ''}" style="flex:1" onclick="cambiarTabInventario('calendario')">
+        <i class="fas fa-calendar-alt"></i> Calendario de Visitas
+      </button>
+    </div>
+    <div id="inventarioSubView"></div>
+  `;
+
+  if (activeTab === 'productos') {
+    renderTabProductos();
+  } else if (activeTab === 'devoluciones') {
+    renderTabDevoluciones();
+  } else if (activeTab === 'calendario') {
+    renderTabCalendario();
+  }
+}
+
+function cambiarTabInventario(tab) {
+  window._activeInventarioTab = tab;
+  renderInventarioTabsStructure();
+}
+
+function renderTabProductos() {
+  const subView = document.getElementById('inventarioSubView');
+  const categorias = window._invCategorias || [];
+  const proveedores = window._invProveedores || [];
+  
+  subView.innerHTML = `
+    <div class="search-bar" style="margin-bottom:16px">
+      <input type="text" id="searchInventario" placeholder="Buscar producto..." oninput="filtrarInventario()">
+      <select id="filtroCategoria" onchange="filtrarInventario()"><option value="">Todas las categorias</option>
+        ${categorias.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('')}
+      </select>
+      <select id="filtroProveedor" onchange="filtrarInventario()"><option value="">Todos los proveedores</option>
+        ${proveedores.map(p => `<option value="${p.id}">${p.nombre_empresa}</option>`).join('')}
+      </select>
+      <button class="btn btn-primary" onclick="mostrarFormProducto()"><i class="fas fa-plus"></i> Producto</button>
+      <button class="btn btn-secondary" onclick="mostrarFormCategoria()"><i class="fas fa-tag"></i> Categoria</button>
+    </div>
+    <div class="card animate-fadeIn">
+      <div class="card-body" style="padding:0">
+        <div class="table-container">
+          <table>
+            <thead><tr>
+              <th>Codigo</th><th>Producto</th><th>Categoria</th><th>Proveedor</th><th>P. Compra</th><th>P. Venta</th><th>Stock</th><th>Min</th><th>Vencimiento</th><th>Acciones</th>
+            </tr></thead>
+            <tbody id="tablaInventario"></tbody>
+          </table>
+        </div>
       </div>
-      <div class="card">
+    </div>
+  `;
+  filtrarInventario();
+}
+
+async function renderTabDevoluciones() {
+  const subView = document.getElementById('inventarioSubView');
+  subView.innerHTML = '<div class="text-center" style="padding:30px;"><div class="loader-ripple"><div></div><div></div></div><p>Cargando devoluciones...</p></div>';
+  try {
+    const devoluciones = await request('/inventario/devoluciones');
+    subView.innerHTML = `
+      <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+        <button class="btn btn-primary" onclick="mostrarFormDevolucion()"><i class="fas fa-plus"></i> Registrar Devolución</button>
+      </div>
+      <div class="card animate-fadeIn">
         <div class="card-body" style="padding:0">
           <div class="table-container">
             <table>
               <thead><tr>
-                <th>Codigo</th><th>Producto</th><th>Categoria</th><th>Proveedor</th><th>P. Compra</th><th>P. Venta</th><th>Stock</th><th>Min</th><th>Vencimiento</th><th>Acciones</th>
+                <th>Fecha</th><th>Producto</th><th>Proveedor</th><th>Cantidad</th><th>Precio Compra</th><th>Total</th><th>Motivo</th><th>Estado</th><th>Acciones</th>
               </tr></thead>
-              <tbody id="tablaInventario"></tbody>
+              <tbody>${devoluciones.length ? devoluciones.map(d => `<tr>
+                <td>${d.created_at}</td>
+                <td><strong>${d.producto_nombre}</strong><br><small class="text-muted">${d.codigo_barras || ''}</small></td>
+                <td>${d.proveedor_nombre}</td>
+                <td><strong>${d.cantidad}</strong></td>
+                <td>$${Number(d.precio_compra).toLocaleString('es-CO')}</td>
+                <td><strong>$${Number(d.cantidad * d.precio_compra).toLocaleString('es-CO')}</strong></td>
+                <td><span style="font-size:11px;background:rgba(0,0,0,0.05);padding:2px 6px;border-radius:4px">${d.motivo}</span></td>
+                <td><span class="status-badge ${d.estado === 'pendiente' ? 'warning' : 'success'}">${d.estado}</span></td>
+                <td>
+                  ${d.estado === 'pendiente' ? `
+                    <button class="btn btn-sm btn-success" onclick="completarDevolucion(${d.id})" title="Marcar como Devuelto"><i class="fas fa-check"></i> Completar</button>
+                  ` : '-'}
+                </td>
+              </tr>`).join('') : '<tr><td colspan="9" class="text-center text-muted" style="padding:40px">No hay devoluciones registradas</td></tr>'}</tbody>
             </table>
           </div>
         </div>
       </div>
     `;
-    window._invProductos = productos;
-    window._invCategorias = categorias;
-    window._invProveedores = proveedores;
-    filtrarInventario();
   } catch (err) {
-    container.innerHTML = `<div class="empty-state"><h3>Error</h3><p>${err.message}</p></div>`;
+    subView.innerHTML = `<div class="empty-state"><h3>Error</h3><p>${err.message}</p></div>`;
   }
+}
+
+function mostrarFormDevolucion() {
+  const productos = window._invProductos || [];
+  const proveedores = window._invProveedores || [];
+  
+  abrirModal('Registrar Devolución a Proveedor', `
+    <form id="formDevolucion">
+      <div class="form-group"><label>Producto *</label>
+        <select id="devProductoId" onchange="actualizarStockDisponibleDevolucion(this.value)" required>
+          <option value="">Seleccione un producto...</option>
+          ${productos.map(p => `<option value="${p.id}">${p.nombre} (Stock: ${p.stock})</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group"><label>Stock Disponible para Devolución</label>
+        <input type="text" id="devStockDisp" readonly class="form-control" style="background:#f1f2f6" value="-">
+      </div>
+      <div class="form-group"><label>Proveedor *</label>
+        <select id="devProveedorId" required>
+          <option value="">Seleccione un proveedor...</option>
+          ${proveedores.map(p => `<option value="${p.id}">${p.nombre_empresa}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group"><label>Cantidad a Devolver *</label>
+        <input type="number" id="devCantidad" min="1" required>
+      </div>
+      <div class="form-group"><label>Motivo de Devolución *</label>
+        <input type="text" id="devMotivo" placeholder="Ej. Producto defectuoso, próximo a vencer..." required maxlength="200">
+      </div>
+    </form>
+  `, `<button class="btn btn-primary" onclick="guardarDevolucion()"><i class="fas fa-check"></i> Registrar</button>`);
+}
+
+function actualizarStockDisponibleDevolucion(prodId) {
+  const prod = (window._invProductos || []).find(p => p.id == prodId);
+  const input = document.getElementById('devStockDisp');
+  const provSelect = document.getElementById('devProveedorId');
+  if (prod) {
+    input.value = prod.stock;
+    if (prod.proveedor_id) {
+      provSelect.value = prod.proveedor_id;
+    }
+  } else {
+    input.value = '-';
+  }
+}
+
+async function guardarDevolucion() {
+  const producto_id = document.getElementById('devProductoId').value;
+  const proveedor_id = document.getElementById('devProveedorId').value;
+  const cantidad = parseInt(document.getElementById('devCantidad').value);
+  const motivo = document.getElementById('devMotivo').value.trim();
+
+  if (!producto_id || !proveedor_id || !cantidad || !motivo) {
+    return Swal.fire({ icon: 'error', title: 'Campos requeridos', text: 'Por favor completa todos los campos obligatorios.' });
+  }
+
+  const prod = (window._invProductos || []).find(p => p.id == producto_id);
+  if (!prod) return;
+  if (cantidad > prod.stock) {
+    return Swal.fire({ icon: 'error', title: 'Stock insuficiente', text: `No puedes devolver más de lo disponible (${prod.stock}).` });
+  }
+
+  try {
+    await request('/inventario/devoluciones', {
+      method: 'POST',
+      body: JSON.stringify({ producto_id, proveedor_id, cantidad, motivo })
+    });
+    cerrarModal();
+    Swal.fire({ icon: 'success', title: 'Devolución registrada', timer: 1500, showConfirmButton: false });
+    const updatedProductos = await request('/inventario');
+    window._invProductos = updatedProductos;
+    renderTabDevoluciones();
+  } catch (err) {
+    Swal.fire({ icon: 'error', title: 'Error', text: err.message });
+  }
+}
+
+async function completarDevolucion(id) {
+  const result = await Swal.fire({
+    title: '¿Confirmar devolución?',
+    text: '¿Confirmas que el proveedor recibió la mercancía y la devolución ha sido completada?',
+    icon: 'question',
+    showCancelButton: true,
+    confirmButtonColor: '#00cec9',
+    confirmButtonText: 'Sí, Completar',
+    cancelButtonText: 'Cancelar'
+  });
+  if (!result.isConfirmed) return;
+  try {
+    await request(`/inventario/devoluciones/${id}/estado`, {
+      method: 'PUT',
+      body: JSON.stringify({ estado: 'devuelto' })
+    });
+    Swal.fire({ icon: 'success', title: 'Devolución completada', timer: 1500, showConfirmButton: false });
+    renderTabDevoluciones();
+  } catch (err) {
+    Swal.fire({ icon: 'error', title: 'Error', text: err.message });
+  }
+}
+
+async function renderTabCalendario() {
+  const subView = document.getElementById('inventarioSubView');
+  subView.innerHTML = '<div class="text-center" style="padding:30px;"><div class="loader-ripple"><div></div><div></div></div><p>Cargando agenda de visitas...</p></div>';
+  try {
+    const [visitas, devoluciones] = await Promise.all([
+      request('/inventario/proveedores/visitas'),
+      request('/inventario/devoluciones')
+    ]);
+    
+    window._cachedVisitas = visitas;
+    window._cachedDevoluciones = devoluciones;
+    const proveedores = window._invProveedores || [];
+
+    if (window._currentCalendarMonth === undefined) {
+      const d = new Date();
+      window._currentCalendarMonth = d.getMonth();
+      window._currentCalendarYear = d.getFullYear();
+    }
+
+    const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+    const tempDate = new Date(window._currentCalendarYear, window._currentCalendarMonth, 1);
+    
+    let startDayOffset = tempDate.getDay() - 1; 
+    if (startDayOffset < 0) startDayOffset = 6; 
+    
+    const totalDays = new Date(window._currentCalendarYear, window._currentCalendarMonth + 1, 0).getDate();
+
+    // Recordatorios de visitas
+    const todayStr = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Bogota' }); // YYYY-MM-DD
+    const tomorrowStr = new Date(Date.now() + 86400000).toLocaleDateString('sv-SE', { timeZone: 'America/Bogota' });
+
+    const visitsToday = visitas.filter(v => v.fecha_visita === todayStr);
+    const visitsTomorrow = visitas.filter(v => v.fecha_visita === tomorrowStr);
+    
+    let reminderHtml = '';
+    if (visitsToday.length > 0) {
+      reminderHtml += `
+        <div style="background:rgba(225,112,85,0.15);border:1px solid var(--danger);border-radius:10px;padding:12px;margin-bottom:15px;font-size:13px;color:var(--danger)">
+          <i class="fas fa-exclamation-triangle" style="margin-right:8px"></i>
+          <strong>¡Recordatorio para HOY!</strong> Tienes programada(s) ${visitsToday.length} visita(s): 
+          ${visitsToday.map(v => `<strong>${v.proveedor_nombre}</strong>`).join(', ')}.
+        </div>
+      `;
+    }
+    if (visitsTomorrow.length > 0) {
+      reminderHtml += `
+        <div style="background:rgba(253,203,110,0.15);border:1px solid var(--warning);border-radius:10px;padding:12px;margin-bottom:15px;font-size:13px;color:var(--dark)">
+          <i class="fas fa-bell" style="margin-right:8px;color:var(--warning)"></i>
+          <strong>¡Recordatorio para Mañana!</strong> Visita programada de: 
+          ${visitsTomorrow.map(v => `<strong>${v.proveedor_nombre}</strong>`).join(', ')}.
+        </div>
+      `;
+    }
+    if (visitsToday.length === 0 && visitsTomorrow.length === 0) {
+      reminderHtml = `
+        <div style="background:rgba(0,184,148,0.1);border:1px solid var(--success);border-radius:10px;padding:12px;margin-bottom:15px;font-size:13px;color:var(--success)">
+          <i class="fas fa-check-circle" style="margin-right:8px"></i> No hay visitas programadas para hoy ni mañana.
+        </div>
+      `;
+    }
+
+    subView.innerHTML = `
+      <div class="row" style="display:flex;gap:20px;flex-wrap:wrap">
+        <div style="flex:1.2;min-width:320px">
+          <!-- RECORDATORIOS -->
+          ${reminderHtml}
+
+          <!-- CALENDARIO -->
+          <div class="card" style="margin-bottom:20px">
+            <div class="card-body">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px">
+                <h4 style="margin:0;font-size:16px"><i class="fas fa-calendar-alt" style="color:var(--primary)"></i> Calendario de Visitas</h4>
+                <div style="display:flex;gap:5px;align-items:center">
+                  <button class="btn btn-sm btn-outline" onclick="cambiarMesCalendario(-1)" style="padding:4px 8px;border-color:var(--gray-200)"><i class="fas fa-chevron-left"></i></button>
+                  <strong style="font-size:14px;min-width:110px;text-align:center">${monthNames[window._currentCalendarMonth]} ${window._currentCalendarYear}</strong>
+                  <button class="btn btn-sm btn-outline" onclick="cambiarMesCalendario(1)" style="padding:4px 8px;border-color:var(--gray-200)"><i class="fas fa-chevron-right"></i></button>
+                </div>
+              </div>
+
+              <div class="calendar-grid" style="display:grid;grid-template-columns:repeat(7, 1fr);gap:6px;text-align:center;font-size:12px">
+                <div style="font-weight:700;color:var(--gray-300);padding:5px 0">Lu</div>
+                <div style="font-weight:700;color:var(--gray-300);padding:5px 0">Ma</div>
+                <div style="font-weight:700;color:var(--gray-300);padding:5px 0">Mi</div>
+                <div style="font-weight:700;color:var(--gray-300);padding:5px 0">Ju</div>
+                <div style="font-weight:700;color:var(--gray-300);padding:5px 0">Vi</div>
+                <div style="font-weight:700;color:var(--gray-300);padding:5px 0">Sá</div>
+                <div style="font-weight:700;color:var(--gray-300);padding:5px 0">Do</div>
+                
+                ${Array(startDayOffset).fill(0).map(() => `<div style="padding:12px 0;opacity:0.25;color:var(--gray-300)">-</div>`).join('')}
+                
+                ${Array(totalDays).fill(0).map((_, i) => {
+                  const dayNum = i + 1;
+                  const dateStr = `${window._currentCalendarYear}-${String(window._currentCalendarMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                  const dayVisits = visitas.filter(v => v.fecha_visita === dateStr);
+                  const isToday = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Bogota' }) === dateStr;
+                  
+                  let cellBg = 'transparent';
+                  let border = '1px solid var(--gray-200)';
+                  let color = 'inherit';
+                  if (isToday) {
+                    cellBg = 'rgba(0, 206, 201, 0.1)';
+                    border = '2px solid var(--secondary)';
+                  }
+                  if (dayVisits.length > 0) {
+                    cellBg = 'rgba(108, 92, 231, 0.05)';
+                    border = isToday ? '2px solid var(--secondary)' : '1px solid var(--primary)';
+                  }
+                  
+                  return `
+                    <div onclick="seleccionarFechaCalendario('${dateStr}')" style="cursor:pointer;border-radius:8px;padding:10px 0;background:${cellBg};border:${border};color:${color};position:relative;transition:all 0.2s" class="calendar-day-cell" title="${dayVisits.length} visita(s)">
+                      <strong>${dayNum}</strong>
+                      ${dayVisits.length > 0 ? `
+                        <div style="display:flex;justify-content:center;gap:2px;margin-top:2px">
+                          ${dayVisits.map(() => `<div style="width:5px;height:5px;border-radius:50%;background:var(--primary)"></div>`).join('')}
+                        </div>
+                      ` : '<div style="height:7px"></div>'}
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="flex:1;min-width:300px">
+          <!-- FORMULARIO DE AGENDAMIENTO -->
+          <div class="card" style="margin-bottom:20px">
+            <div class="card-body">
+              <h4 style="margin-top:0;margin-bottom:15px"><i class="fas fa-calendar-plus" style="color:var(--primary)"></i> Agendar Visita de Proveedor</h4>
+              <form id="formAgendarVisita" onsubmit="event.preventDefault(); guardarVisitaProveedor();">
+                <div class="form-group"><label>Proveedor *</label>
+                  <select id="visitaProveedorId" required>
+                    <option value="">Seleccione un proveedor...</option>
+                    ${proveedores.map(p => `<option value="${p.id}">${p.nombre_empresa}</option>`).join('')}
+                  </select>
+                </div>
+                <div class="form-group"><label>Fecha de Visita *</label>
+                  <input type="date" id="visitaFecha" required min="${new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Bogota' })}">
+                </div>
+                <div class="form-group"><label>Notas / Pedido Estimado</label>
+                  <textarea id="visitaNotas" placeholder="Escribe notas sobre productos requeridos, condiciones..." style="height:60px;width:100%;padding:10px;border:1px solid var(--gray-200);border-radius:var(--radius-sm);font-family:inherit;outline:none"></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary" style="width:100%"><i class="fas fa-save"></i> Agendar Visita</button>
+              </form>
+            </div>
+          </div>
+
+          <!-- DETALLES DE VISITA -->
+          <div id="visitaDetallePanel">
+            <div class="card" style="height:100%;min-height:200px;display:flex;align-items:center;justify-content:center;border:2px dashed var(--gray-200);background:rgba(0,0,0,0.02)">
+              <div class="text-center" style="padding:20px;color:var(--gray-300)">
+                <i class="fas fa-info-circle" style="font-size:32px;margin-bottom:10px"></i>
+                <p>Selecciona una fecha en el calendario para ver las visitas programadas o programar una nueva.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    
+    const todaySelect = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Bogota' });
+    if (visitas.some(v => v.fecha_visita === todaySelect)) {
+      seleccionarFechaCalendario(todaySelect);
+    }
+  } catch (err) {
+    subView.innerHTML = `<div class="empty-state"><h3>Error</h3><p>${err.message}</p></div>`;
+  }
+}
+
+function cambiarMesCalendario(offset) {
+  window._currentCalendarMonth += offset;
+  if (window._currentCalendarMonth < 0) {
+    window._currentCalendarMonth = 11;
+    window._currentCalendarYear -= 1;
+  } else if (window._currentCalendarMonth > 11) {
+    window._currentCalendarMonth = 0;
+    window._currentCalendarYear += 1;
+  }
+  renderTabCalendario();
+}
+
+function seleccionarFechaCalendario(dateStr) {
+  const input = document.getElementById('visitaFecha');
+  if (input) {
+    input.value = dateStr;
+  }
+  
+  document.querySelectorAll('.calendar-day-cell').forEach(c => {
+    c.style.boxShadow = 'none';
+  });
+  const cells = document.querySelectorAll('.calendar-day-cell');
+  cells.forEach(c => {
+    if (c.getAttribute('onclick')?.includes(dateStr)) {
+      c.style.boxShadow = '0 0 0 2px var(--primary)';
+    }
+  });
+
+  const panel = document.getElementById('visitaDetallePanel');
+  const visitas = window._cachedVisitas || [];
+  const dayVisits = visitas.filter(v => v.fecha_visita === dateStr);
+  
+  if (dayVisits.length > 0) {
+    panel.innerHTML = `
+      <div class="card animate-fadeIn" style="margin-top:10px">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;padding:12px 15px">
+          <h4 style="margin:0;font-size:15px">Visitas del ${dateStr}</h4>
+          <span class="status-badge info" style="font-size:11px">${dayVisits.length} visita(s)</span>
+        </div>
+        <div class="card-body" style="padding:15px">
+          <div style="display:flex;flex-direction:column;gap:12px">
+            ${dayVisits.map(v => `
+              <div style="padding:12px;border:1px solid var(--gray-200);border-radius:var(--radius-sm);background:rgba(0,0,0,0.01);position:relative">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                  <strong style="color:var(--primary);font-size:14px">${v.proveedor_nombre}</strong>
+                  <button class="btn btn-sm btn-danger" onclick="eliminarVisitaProveedor(${v.id})" style="padding:4px 8px" title="Eliminar"><i class="fas fa-trash"></i></button>
+                </div>
+                <p style="margin:2px 0;font-size:12px"><strong>Contacto:</strong> ${v.contacto_nombre || 'N/A'} (${v.contacto_telefono || 'N/A'})</p>
+                <p style="margin:6px 0 0 0;font-size:12px;background:rgba(108,92,231,0.04);padding:8px;border-radius:6px;color:var(--gray-700)">
+                  <i class="fas fa-sticky-note" style="margin-right:6px"></i>${v.notas || 'Sin notas.'}
+                </p>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    `;
+  } else {
+    panel.innerHTML = `
+      <div class="card animate-fadeIn" style="height:100%;min-height:180px;display:flex;align-items:center;justify-content:center;border:2px dashed var(--gray-200);background:rgba(0,0,0,0.02)">
+        <div class="text-center" style="padding:20px;color:var(--gray-300)">
+          <i class="fas fa-calendar-plus" style="font-size:32px;margin-bottom:10px"></i>
+          <p style="font-size:13px">No hay visitas agendadas para el <strong>${dateStr}</strong>.</p>
+          <p style="font-size:11px;margin-top:4px">Puedes agendar una visita usando el formulario superior.</p>
+        </div>
+      </div>
+    `;
+  }
+}
+
+window.cambiarMesCalendario = cambiarMesCalendario;
+window.seleccionarFechaCalendario = seleccionarFechaCalendario;
+
+async function guardarVisitaProveedor() {
+  const proveedor_id = document.getElementById('visitaProveedorId').value;
+  const fecha_visita = document.getElementById('visitaFecha').value;
+  const notas = document.getElementById('visitaNotas').value.trim();
+
+  try {
+    await request('/inventario/proveedores/visitas', {
+      method: 'POST',
+      body: JSON.stringify({ proveedor_id, fecha_visita, notas })
+    });
+    Swal.fire({ icon: 'success', title: 'Visita agendada', timer: 1500, showConfirmButton: false });
+    renderTabCalendario();
+  } catch (err) {
+    Swal.fire({ icon: 'error', title: 'Error', text: err.message });
+  }
+}
+
+async function eliminarVisitaProveedor(id) {
+  const result = await Swal.fire({
+    title: '¿Eliminar visita?',
+    text: '¿Estás seguro de que deseas cancelar y eliminar esta visita agendada?',
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonColor: '#d33',
+    confirmButtonText: 'Sí, eliminar',
+    cancelButtonText: 'Cancelar'
+  });
+  if (!result.isConfirmed) return;
+  try {
+    await request(`/inventario/proveedores/visitas/${id}`, { method: 'DELETE' });
+    Swal.fire({ icon: 'success', title: 'Visita eliminada', timer: 1500, showConfirmButton: false });
+    renderTabCalendario();
+  } catch (err) {
+    Swal.fire({ icon: 'error', title: 'Error', text: err.message });
+  }
+}
+
+function seleccionarVisita(id) {
+  document.querySelectorAll('[id^="rowVisita_"]').forEach(r => r.style.background = '');
+  const activeRow = document.getElementById(`rowVisita_${id}`);
+  if (activeRow) activeRow.style.background = 'rgba(108,92,231,0.08)';
+
+  const visit = (window._cachedVisitas || []).find(v => v.id === id);
+  if (!visit) return;
+
+  const productos = window._invProductos || [];
+  const devoluciones = window._cachedDevoluciones || [];
+
+  const bajoStock = productos.filter(p => p.proveedor_id === visit.proveedor_id && p.stock <= p.stock_minimo);
+  const devPendientes = devoluciones.filter(d => d.proveedor_id === visit.proveedor_id && d.estado === 'pendiente');
+
+  const detailPanel = document.getElementById('visitaDetallePanel');
+  detailPanel.innerHTML = `
+    <div class="card animate-fadeIn" style="border: 1px solid var(--primary);">
+      <div class="card-body">
+        <h3 style="margin-top:0;color:var(--primary);border-bottom:2px solid var(--gray-100);padding-bottom:10px">
+          <i class="fas fa-truck"></i> ${visit.proveedor_nombre}
+        </h3>
+        
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:20px;background:rgba(0,0,0,0.02);padding:10px;border-radius:8px">
+          <div>
+            <strong>Contacto:</strong><br>
+            <span>${visit.contacto_nombre || 'No registrado'}</span>
+          </div>
+          <div>
+            <strong>Teléfono:</strong><br>
+            <span>${visit.contacto_telefono ? `<a href="tel:${visit.contacto_telefono}" class="text-primary">${visit.contacto_telefono}</a>` : 'No registrado'}</span>
+          </div>
+          <div style="grid-column: span 2">
+            <strong>Fecha de Visita:</strong><br>
+            <span><i class="fas fa-calendar-alt"></i> ${visit.fecha_visita}</span>
+          </div>
+        </div>
+
+        <div style="margin-bottom:20px">
+          <h4 style="margin:0 0 10px 0;display:flex;justify-content:between;align-items:center">
+            <span><i class="fas fa-exclamation-triangle" style="color:var(--warning)"></i> Productos Bajo Stock (${bajoStock.length})</span>
+          </h4>
+          ${bajoStock.length ? `
+            <div style="max-height:120px;overflow-y:auto;border:1px solid var(--gray-100);border-radius:6px">
+              <table style="font-size:12px;margin:0">
+                <thead><tr><th>Producto</th><th>Stock</th><th>Mínimo</th></tr></thead>
+                <tbody>${bajoStock.map(p => `
+                  <tr>
+                    <td><strong>${p.nombre}</strong></td>
+                    <td><span class="status-badge danger">${p.stock}</span></td>
+                    <td>${p.stock_minimo}</td>
+                  </tr>
+                `).join('')}</tbody>
+              </table>
+            </div>
+          ` : '<p class="text-success" style="font-size:13px;margin:0"><i class="fas fa-check-circle"></i> Todos los productos tienen stock saludable.</p>'}
+        </div>
+
+        <div style="margin-bottom:20px">
+          <h4 style="margin:0 0 10px 0;display:flex;justify-content:between;align-items:center">
+            <span><i class="fas fa-undo" style="color:var(--danger)"></i> Devoluciones Pendientes (${devPendientes.length})</span>
+          </h4>
+          ${devPendientes.length ? `
+            <div style="max-height:120px;overflow-y:auto;border:1px solid var(--gray-100);border-radius:6px">
+              <table style="font-size:12px;margin:0">
+                <thead><tr><th>Producto</th><th>Cant.</th><th>Motivo</th></tr></thead>
+                <tbody>${devPendientes.map(d => `
+                  <tr>
+                    <td><strong>${d.producto_nombre}</strong></td>
+                    <td><strong>${d.cantidad}</strong></td>
+                    <td><small>${d.motivo}</small></td>
+                  </tr>
+                `).join('')}</tbody>
+              </table>
+            </div>
+          ` : '<p class="text-muted" style="font-size:13px;margin:0">No hay devoluciones pendientes.</p>'}
+        </div>
+
+        <div style="background:#fffcf0;border-left:4px solid #f1c40f;padding:12px;border-radius:4px">
+          <h4 style="margin:0 0 6px 0;color:#b7950b"><i class="fas fa-sticky-note"></i> Notas de la Visita</h4>
+          <p style="margin:0;font-size:13px;white-space:pre-wrap">${visit.notas || 'Sin notas registradas.'}</p>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 function filtrarInventario() {
@@ -521,13 +1155,41 @@ function filtrarInventario() {
   const catId = document.getElementById('filtroCategoria')?.value;
   const provId = document.getElementById('filtroProveedor')?.value;
   const productos = window._invProductos || [];
+
+  const filterType = window._invFilterType;
+  const searchBar = document.querySelector('#moduleInventario .search-bar');
+  let filterAlert = document.getElementById('invFilterAlert');
+
+  if (filterType && searchBar) {
+    if (!filterAlert) {
+      filterAlert = document.createElement('div');
+      filterAlert.id = 'invFilterAlert';
+      filterAlert.style.cssText = 'background:rgba(108,92,231,0.08);border:1px solid rgba(108,92,231,0.2);padding:10px 15px;border-radius:var(--radius-sm);margin-bottom:15px;display:flex;justify-content:space-between;align-items:center;font-size:14px;width:100%';
+      searchBar.parentNode.insertBefore(filterAlert, searchBar.nextSibling);
+    }
+    const label = filterType === 'bajo_stock' ? 'Bajo Stock' : 'Próximos a Vencer (30 días)';
+    filterAlert.innerHTML = `
+      <span><i class="fas fa-filter" style="color:var(--primary);margin-right:6px"></i> Mostrando solo productos con: <strong>${label}</strong></span>
+      <button class="btn btn-sm btn-outline" style="padding:4px 10px;font-size:12px" onclick="limpiarFiltroInventario()"><i class="fas fa-times"></i> Quitar filtro</button>
+    `;
+  } else {
+    if (filterAlert) filterAlert.remove();
+  }
+
   const filtrados = productos.filter(p => {
     if (busqueda && !p.nombre.toLowerCase().includes(busqueda) && !(p.codigo_barras || '').toLowerCase().includes(busqueda)) return false;
     if (catId && p.categoria_id != catId) return false;
     if (provId && p.proveedor_id != provId) return false;
+    if (filterType === 'bajo_stock' && p.stock > p.stock_minimo) return false;
+    if (filterType === 'por_vencer') {
+      if (!p.fecha_vencimiento) return false;
+      const diff = (new Date(p.fecha_vencimiento + 'T23:59:59') - new Date()) / 86400000;
+      if (diff > 30 || diff < 0) return false;
+    }
     return true;
   });
-  document.getElementById('tablaInventario').innerHTML = filtrados.map(p => {
+
+  document.getElementById('tablaInventario').innerHTML = filtrados.length ? filtrados.map(p => {
     const stockClass = p.stock === 0 ? 'danger' : p.stock <= p.stock_minimo ? 'warning' : 'success';
     const vencer = p.fecha_vencimiento ? new Date(p.fecha_vencimiento + 'T23:59:59') : null;
     const vencerClass = vencer && (vencer - new Date()) / 86400000 <= 30 ? 'danger' : '';
@@ -548,7 +1210,12 @@ function filtrarInventario() {
         <button class="btn btn-sm btn-danger" onclick="eliminarProducto(${p.id})" title="Eliminar"><i class="fas fa-trash"></i></button>
       </td>
     </tr>`;
-  }).join('');
+  }).join('') : '<tr><td colspan="10" class="text-center text-muted" style="padding:30px">Sin productos que coincidan</td></tr>';
+}
+
+function limpiarFiltroInventario() {
+  window._invFilterType = null;
+  filtrarInventario();
 }
 
 function mostrarFormProducto(id = null) {
@@ -559,7 +1226,13 @@ function mostrarFormProducto(id = null) {
     <form id="formProducto">
       <div class="form-row">
         <div class="form-group"><label>Nombre *</label><input type="text" id="prodNombre" value="${producto?.nombre || ''}" required oninput="this.value=validators.nombrePropio(this.value)" maxlength="100"></div>
-        <div class="form-group"><label>Codigo Barras</label><input type="text" id="prodCodigo" value="${producto?.codigo_barras || ''}"></div>
+        <div class="form-group">
+          <label>Codigo Barras</label>
+          <div style="display:flex;gap:8px">
+            <input type="text" id="prodCodigo" value="${producto?.codigo_barras || ''}">
+            <button type="button" class="btn btn-secondary" onclick="escanearCodigo(code => { document.getElementById('prodCodigo').value = code; cerrarEscanner(); })" style="padding:0 12px;height:42px;display:flex;align-items:center;justify-content:center" title="Escanear con cámara"><i class="fas fa-camera"></i></button>
+          </div>
+        </div>
       </div>
       <div class="form-group"><label>Descripcion</label><textarea id="prodDescripcion">${producto?.descripcion || ''}</textarea></div>
       <div class="form-row">
@@ -613,16 +1286,52 @@ async function eliminarProducto(id) {
   catch (err) { Swal.fire({ icon: 'error', title: 'Error', text: err.message }); }
 }
 
+function toggleAjusteFields(tipo) {
+  const ent = document.getElementById('ajusteEntradaFields');
+  const sal = document.getElementById('ajusteSalidaFields');
+  if (ent) ent.style.display = tipo === 'entrada' ? 'block' : 'none';
+  if (sal) sal.style.display = tipo === 'salida' ? 'block' : 'none';
+}
+
 function mostrarAjusteStock(id) {
   const prod = (window._invProductos || []).find(p => p.id === id);
   abrirModal('Ajustar Stock', `
     <p><strong>${prod?.nombre}</strong> - Stock actual: <span class="status-badge info">${prod?.stock}</span></p>
     <form id="formAjuste">
       <div class="form-group"><label>Tipo de movimiento</label>
-        <select id="ajusteTipo"><option value="entrada">Entrada (+)</option><option value="salida">Salida (-)</option><option value="ajuste">Ajuste (fijar cantidad)</option></select>
+        <select id="ajusteTipo" onchange="toggleAjusteFields(this.value)">
+          <option value="entrada">Entrada (+)</option>
+          <option value="salida">Salida (-)</option>
+          <option value="ajuste">Ajuste (fijar cantidad)</option>
+        </select>
       </div>
       <div class="form-group"><label>Cantidad</label><input type="number" id="ajusteCantidad" min="1" required></div>
-      <div class="form-group"><label>Motivo</label><textarea id="ajusteMotivo" placeholder="Ej: Compra a proveedor, ajuste de inventario..."></textarea></div>
+      
+      <div id="ajusteEntradaFields">
+        <div class="form-group"><label>Precio de Compra (Unidad)</label>
+          <input type="number" step="0.01" id="ajustePrecioCompra" value="${prod?.precio_compra || 0}">
+        </div>
+        <div class="form-group"><label>Proveedor</label>
+          <select id="ajusteProveedor">
+            <option value="">Seleccione un proveedor...</option>
+            ${(window._invProveedores || []).map(pv => `<option value="${pv.id}" ${prod?.proveedor_id == pv.id ? 'selected' : ''}>${pv.nombre_empresa}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+
+      <div id="ajusteSalidaFields" style="display:none">
+        <div class="form-group"><label>Motivo de Salida</label>
+          <select id="ajusteMotivoSalida">
+            <option value="vencido">Producto Vencido</option>
+            <option value="defectuoso">Producto Defectuoso</option>
+            <option value="otro">Otro</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group"><label>Observaciones / Detalles</label>
+        <textarea id="ajusteMotivo" placeholder="Notas adicionales del movimiento..."></textarea>
+      </div>
     </form>
   `, `<button class="btn btn-primary" onclick="guardarAjuste(${id})"><i class="fas fa-check"></i> Confirmar</button>`);
 }
@@ -630,10 +1339,27 @@ function mostrarAjusteStock(id) {
 async function guardarAjuste(id) {
   const tipo = document.getElementById('ajusteTipo').value;
   const cantidad = parseInt(document.getElementById('ajusteCantidad').value);
-  const motivo = document.getElementById('ajusteMotivo').value;
+  let motivo = document.getElementById('ajusteMotivo').value.trim();
+  
+  let precio_compra = null;
+  let proveedor_id = null;
+
+  if (tipo === 'entrada') {
+    precio_compra = parseFloat(document.getElementById('ajustePrecioCompra').value) || 0;
+    proveedor_id = document.getElementById('ajusteProveedor').value || null;
+    if (!proveedor_id) return Swal.fire({ icon: 'error', title: 'Proveedor requerido', text: 'Para una entrada de stock honesta y regulada, debes seleccionar el proveedor.' });
+    motivo = motivo ? `Compra a proveedor. Notas: ${motivo}` : 'Compra a proveedor';
+  } else if (tipo === 'salida') {
+    const motivoSalida = document.getElementById('ajusteMotivoSalida').value;
+    motivo = motivo ? `${motivoSalida.toUpperCase()}: ${motivo}` : motivoSalida.toUpperCase();
+  }
+
   if (!cantidad || cantidad < 1) return Swal.fire({ icon: 'error', title: 'Cantidad invalida' });
   try {
-    await request(`/inventario/${id}/ajustar-stock`, { method: 'POST', body: JSON.stringify({ tipo, cantidad, motivo }) });
+    await request(`/inventario/${id}/ajustar-stock`, {
+      method: 'POST',
+      body: JSON.stringify({ tipo, cantidad, motivo, precio_compra, proveedor_id })
+    });
     cerrarModal();
     Swal.fire({ icon: 'success', title: 'Stock actualizado', timer: 1500, showConfirmButton: false });
     renderInventario();
@@ -713,29 +1439,60 @@ async function renderVentas() {
   } catch (err) { container.innerHTML = `<div class="empty-state"><h3>Error</h3><p>${err.message}</p></div>`; }
 }
 
-function mostrarNuevaVenta() {
-  const productos = window._ventasProductos || [];
-  const disponibles = productos.filter(p => p.stock > 0);
-  let items = [];
-  abrirModal('Nueva Venta', `
-    <div style="margin-bottom:15px">
-      <div class="form-row">
-        <div class="form-group"><label>Agregar Producto</label>
-          <select id="ventaProductoSelect" onchange="agregarItemVenta()">
-            <option value="">Seleccione un producto...</option>
-            ${disponibles.map(p => `<option value="${p.id}" data-precio="${p.precio_venta}" data-stock="${p.stock}" data-nombre="${p.nombre}">${p.nombre} - $${Number(p.precio_venta).toLocaleString('es-CO')} (Stock: ${p.stock})</option>`).join('')}
-          </select>
+async function mostrarNuevaVenta() {
+  try {
+    const estado = await request('/apertura/estado');
+    if (!estado.abierto) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'Caja Cerrada',
+        text: 'Debes realizar la apertura de caja antes de registrar ventas.',
+        showCancelButton: true,
+        confirmButtonColor: '#00cec9',
+        confirmButtonText: '<i class="fas fa-cash-register"></i> Ir a Caja',
+        cancelButtonText: 'Cancelar'
+      }).then((result) => {
+        if (result.isConfirmed) {
+          cargarModulo('apertura');
+        }
+      });
+      return;
+    }
+
+    const productos = window._ventasProductos || [];
+    const disponibles = productos.filter(p => p.stock > 0);
+    let items = [];
+    abrirModal('Nueva Venta', `
+      <div style="margin-bottom:15px">
+        <div class="form-group" style="margin-bottom:12px">
+          <label>Escanear Código de Barras (Pistola USB / Cámara)</label>
+          <div style="display:flex;gap:8px">
+            <input type="text" id="ventaBarcodeScan" placeholder="Enfoque aquí y use el lector o digite el código..." style="flex:1" onkeydown="handleVentaBarcodeKey(event)">
+            <button type="button" class="btn btn-secondary" onclick="escanearCodigo(code => { agregarProductoPorCodigo(code); cerrarEscanner(); })" style="padding:0 12px;height:42px;display:flex;align-items:center;justify-content:center" title="Escanear con cámara"><i class="fas fa-camera"></i></button>
+          </div>
         </div>
-        <div class="form-group"><label>Cantidad</label><input type="number" id="ventaCantidad" value="1" min="1"></div>
+        <div class="form-row">
+          <div class="form-group"><label>O Seleccionar Manualmente</label>
+            <select id="ventaProductoSelect" onchange="agregarItemVenta()">
+              <option value="">Seleccione un producto...</option>
+              ${disponibles.map(p => `<option value="${p.id}" data-precio="${p.precio_venta}" data-stock="${p.stock}" data-nombre="${p.nombre}">${p.nombre} - $${Number(p.precio_venta).toLocaleString('es-CO')} (Stock: ${p.stock})</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group"><label>Cantidad</label><input type="number" id="ventaCantidad" value="1" min="1"></div>
+        </div>
+        <div id="ventaItemsList" style="margin-top:10px"></div>
+        <div style="text-align:right;font-size:20px;font-weight:800;margin-top:15px;padding-top:15px;border-top:2px solid var(--gray-200)">
+          Total: $<span id="ventaTotal">0</span>
+        </div>
       </div>
-      <div id="ventaItemsList" style="margin-top:10px"></div>
-      <div style="text-align:right;font-size:20px;font-weight:800;margin-top:15px;padding-top:15px;border-top:2px solid var(--gray-200)">
-        Total: $<span id="ventaTotal">0</span>
-      </div>
-    </div>
-  `, `<button class="btn btn-success" onclick="procesarVenta()"><i class="fas fa-check-circle"></i> Cobrar $<span id="ventaTotalFooter">0</span></button>`);
-  window._ventaItems = [];
-  actualizarTotalVenta();
+    `, `<button class="btn btn-success" onclick="procesarVenta()"><i class="fas fa-check-circle"></i> Cobrar $<span id="ventaTotalFooter">0</span></button>`);
+    window._ventaItems = [];
+    actualizarTotalVenta();
+    setTimeout(() => {
+      const scanInput = document.getElementById('ventaBarcodeScan');
+      if (scanInput) scanInput.focus();
+    }, 150);
+  } catch (err) { Swal.fire({ icon: 'error', title: 'Error de Caja', text: err.message }); }
 }
 
 function agregarItemVenta() {
@@ -825,7 +1582,6 @@ async function imprimirVenta(id) {
     const venta = await request(`/ventas/${id}`);
     if (typeof imprimirComprobante === 'function') imprimirComprobante(venta);
   } catch (err) { Swal.fire({ icon: 'error', title: 'Error', text: err.message }); }
-}
 }
 
 // ================ EMPLEADOS ================
@@ -1133,29 +1889,160 @@ async function renderLogs() {
   try {
     const data = await request('/logs');
     const resumen = await request('/logs/resumen');
-    container.innerHTML = `
-      <div class="search-bar" style="margin-bottom:16px">
-        <select id="logModulo" onchange="filtrarLogs()"><option value="">Todos los modulos</option>
-          ${data.filtros.modulos.map(m => `<option value="${m.modulo}">${m.modulo}</option>`).join('')}
-        </select>
-        <input type="text" id="logBusqueda" placeholder="Buscar accion..." oninput="filtrarLogs()">
+    
+    window._logsResumen = resumen;
+    window._logsFiltros = data.filtros;
+    window._logsData = data.logs;
+
+    if (!window._activeLogsTab) window._activeLogsTab = 'acciones';
+
+    renderLogsTabsStructure();
+  } catch (err) {
+    container.innerHTML = `<div class="empty-state"><h3>Error</h3><p>${err.message}</p></div>`;
+  }
+}
+
+function renderLogsTabsStructure() {
+  const container = document.getElementById('moduleLogs');
+  const activeTab = window._activeLogsTab;
+
+  container.innerHTML = `
+    <div class="auth-tabs" style="margin-bottom: 20px; display: flex; gap: 4px; background: rgba(0,0,0,0.05); padding: 4px; border-radius: var(--radius-md);">
+      <button class="auth-tab ${activeTab === 'acciones' ? 'active' : ''}" style="flex:1" onclick="cambiarTabLogs('acciones')">
+        <i class="fas fa-clipboard-list"></i> Acciones del Sistema
+      </button>
+      <button class="auth-tab ${activeTab === 'sesiones' ? 'active' : ''}" style="flex:1" onclick="cambiarTabLogs('sesiones')">
+        <i class="fas fa-cash-register"></i> Sesiones de Caja
+      </button>
+      <button class="auth-tab ${activeTab === 'reportes' ? 'active' : ''}" style="flex:1" onclick="cambiarTabLogs('reportes')">
+        <i class="fas fa-chart-line"></i> Reportes Financieros
+      </button>
+    </div>
+    <div id="logsSubView"></div>
+  `;
+
+  if (activeTab === 'acciones') {
+    renderTabAcciones();
+  } else if (activeTab === 'sesiones') {
+    renderTabSesiones();
+  } else if (activeTab === 'reportes') {
+    renderTabReportes();
+  }
+}
+
+function cambiarTabLogs(tab) {
+  window._activeLogsTab = tab;
+  renderLogsTabsStructure();
+}
+
+function renderTabAcciones() {
+  const subView = document.getElementById('logsSubView');
+  const filtros = window._logsFiltros || { modulos: [] };
+  const resumen = window._logsResumen || { totalLogs: 0, logsHoy: 0 };
+
+  subView.innerHTML = `
+    <div class="search-bar" style="margin-bottom:16px">
+      <select id="logModulo" onchange="filtrarLogs()"><option value="">Todos los modulos</option>
+        ${filtros.modulos.map(m => `<option value="${m.modulo}">${m.modulo}</option>`).join('')}
+      </select>
+      <input type="text" id="logBusqueda" placeholder="Buscar accion..." oninput="filtrarLogs()">
+    </div>
+    <div class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:15px">
+      <div class="stat-card"><div class="stat-value">${resumen.totalLogs}</div><div class="stat-label">Total Registros</div></div>
+      <div class="stat-card"><div class="stat-value">${resumen.logsHoy}</div><div class="stat-label">Hoy</div></div>
+    </div>
+    <div class="card animate-fadeIn">
+      <div class="card-body" style="padding:0">
+        <div class="table-container"><table>
+          <thead><tr><th>Fecha</th><th>Usuario</th><th>Accion</th><th>Modulo</th><th>Detalle</th></tr></thead>
+          <tbody id="tablaLogs"></tbody>
+        </table></div>
       </div>
-      <div class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
-        <div class="stat-card"><div class="stat-value">${resumen.totalLogs}</div><div class="stat-label">Total Registros</div></div>
-        <div class="stat-card"><div class="stat-value">${resumen.logsHoy}</div><div class="stat-label">Hoy</div></div>
-      </div>
-      <div class="card" style="margin-top:15px">
+    </div>
+  `;
+  filtrarLogs();
+}
+
+async function renderTabSesiones() {
+  const subView = document.getElementById('logsSubView');
+  subView.innerHTML = '<div class="text-center" style="padding:30px;"><div class="loader-ripple"><div></div><div></div></div><p>Cargando historial de sesiones de caja...</p></div>';
+  try {
+    const data = await request('/apertura/historial');
+    const fmt = n => '$' + Number(n).toLocaleString('es-CO');
+    
+    subView.innerHTML = `
+      <div class="card animate-fadeIn">
         <div class="card-body" style="padding:0">
-          <div class="table-container"><table>
-            <thead><tr><th>Fecha</th><th>Usuario</th><th>Accion</th><th>Modulo</th><th>Detalle</th></tr></thead>
-            <tbody id="tablaLogs"></tbody>
-          </table></div>
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Usuario</th>
+                  <th>Monto Inicial</th>
+                  <th>Monto Final</th>
+                  <th>Diferencia</th>
+                  <th>Estado</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${data.length ? data.map(s => {
+                  const isApertura = s.tipo === 'apertura';
+                  const statusLabel = s.monto_final !== null ? 'Cerrada' : 'Abierta';
+                  const diff = s.monto_final !== null ? (s.monto_final - s.monto_inicial) : 0;
+                  return `
+                    <tr>
+                      <td>${s.created_at}</td>
+                      <td><strong>${s.usuario_nombre}</strong></td>
+                      <td>${fmt(s.monto_inicial)}</td>
+                      <td>${s.monto_final !== null ? fmt(s.monto_final) : '-'}</td>
+                      <td>${s.monto_final !== null ? fmt(diff) : '-'}</td>
+                      <td><span class="status-badge ${s.monto_final !== null ? 'success' : 'danger'}">${statusLabel.toUpperCase()}</span></td>
+                      <td>
+                        <button class="btn btn-sm btn-info" onclick="imprimirDetalleSesion(${s.id})" title="Imprimir Detalle de Caja"><i class="fas fa-print"></i> Historial</button>
+                      </td>
+                    </tr>
+                  `;
+                }).join('') : '<tr><td colspan="7" class="text-center text-muted" style="padding:20px">No hay sesiones registradas</td></tr>'}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     `;
-    window._logsData = data.logs;
-    filtrarLogs();
-  } catch (err) { container.innerHTML = `<div class="empty-state"><h3>Error</h3><p>${err.message}</p></div>`; }
+  } catch (err) {
+    subView.innerHTML = `<div class="empty-state"><h3>Error</h3><p>${err.message}</p></div>`;
+  }
+}
+
+function renderTabReportes() {
+  const subView = document.getElementById('logsSubView');
+  subView.innerHTML = `
+    <div class="card animate-fadeIn" style="margin-bottom:20px">
+      <div class="card-body">
+        <h4 style="margin-top:0;margin-bottom:15px"><i class="fas fa-filter" style="color:var(--primary)"></i> Generar Reporte de Ingresos y Gastos</h4>
+        <div class="form-row" style="display:flex;gap:15px;flex-wrap:wrap">
+          <div class="form-group" style="flex:1;min-width:200px">
+            <label>Período de Agrupación</label>
+            <select id="repPeriodo">
+              <option value="dia">Día Seleccionado</option>
+              <option value="semana">Semana (Últimos 7 días)</option>
+              <option value="mes" selected>Mes Completo</option>
+              <option value="trimestre">Trimestre (Últimos 3 meses)</option>
+              <option value="semestre">Semestre (Últimos 6 meses)</option>
+            </select>
+          </div>
+          <div class="form-group" style="flex:1;min-width:200px">
+            <label>Fecha de Referencia</label>
+            <input type="date" id="repFecha" value="${new Date().toISOString().split('T')[0]}">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="generarReporteFinanciero()"><i class="fas fa-sync"></i> Generar Reporte</button>
+      </div>
+    </div>
+    <div id="reporteFinancieroResultBox"></div>
+  `;
 }
 
 function filtrarLogs() {
@@ -1187,11 +2074,13 @@ async function renderConfig() {
         <div class="card-header"><h3><i class="fas fa-store" style="color:var(--primary)"></i> Informacion de la Tienda</h3></div>
         <div class="card-body">
           <form id="formConfig">
-            <div class="form-group"><label>Nombre de la Tienda</label>
-              <input type="text" id="cfgNombre" value="${config.tienda_nombre || ''}" class="form-input" style="width:100%;padding:14px 16px;border:1px solid var(--gray-200);border-radius:var(--radius-sm);font-size:15px;font-family:inherit;outline:none">
-            </div>
-            <div class="form-group"><label>Footer Personalizado</label>
-              <textarea id="cfgFooter" style="width:100%;padding:14px 16px;border:1px solid var(--gray-200);border-radius:var(--radius-sm);font-size:15px;font-family:inherit;outline:none;resize:vertical">${config.tienda_footer || ''}</textarea>
+            <div class="form-row" style="display:flex;gap:15px;margin-bottom:15px;flex-wrap:wrap">
+              <div class="form-group" style="flex:1;min-width:200px;margin-bottom:0"><label>Nombre de la Tienda</label>
+                <input type="text" id="cfgNombre" value="${config.tienda_nombre || ''}" class="form-input" style="width:100%;padding:14px 16px;border:1px solid var(--gray-200);border-radius:var(--radius-sm);font-size:15px;font-family:inherit;outline:none">
+              </div>
+              <div class="form-group" style="flex:1;min-width:200px;margin-bottom:0"><label>NIT de la Tienda</label>
+                <input type="text" id="cfgNit" value="${config.tienda_nit || ''}" class="form-input" style="width:100%;padding:14px 16px;border:1px solid var(--gray-200);border-radius:var(--radius-sm);font-size:15px;font-family:inherit;outline:none" placeholder="e.g. 123456789-0">
+              </div>
             </div>
             <div class="form-row">
               <div class="form-group"><label>Moneda</label>
@@ -1217,7 +2106,7 @@ async function guardarConfig() {
   try {
     await request('/config', { method: 'PUT', body: JSON.stringify({
       tienda_nombre: document.getElementById('cfgNombre').value,
-      tienda_footer: document.getElementById('cfgFooter').value,
+      tienda_nit: document.getElementById('cfgNit').value,
       moneda: document.getElementById('cfgMoneda').value,
       impuesto: document.getElementById('cfgImpuesto').value
     })});
@@ -1872,3 +2761,885 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   } catch {}
 });
+
+// ================ AUTOMATIZACION DE ESCANER Y NOTIFICACIONES ================
+function toggleNotifications(event) {
+  if (event) event.stopPropagation();
+  const dropdown = document.getElementById('notificationDropdown');
+  if (!dropdown) return;
+  const isHidden = dropdown.style.display === 'none';
+  dropdown.style.display = isHidden ? 'block' : 'none';
+}
+
+// Cerrar dropdown al hacer click fuera
+document.addEventListener('click', (e) => {
+  const dropdown = document.getElementById('notificationDropdown');
+  const bell = document.getElementById('notifBell');
+  if (dropdown && dropdown.style.display !== 'none') {
+    if (!dropdown.contains(e.target) && (!bell || !bell.contains(e.target))) {
+      dropdown.style.display = 'none';
+    }
+  }
+});
+
+function actualizarNotificaciones(data) {
+  window._lastNotifData = data;
+  const badge = document.getElementById('notificationBadge');
+  const countSpan = document.getElementById('notificationCount');
+  const listContainer = document.getElementById('notificationList');
+  if (!badge || !listContainer) return;
+
+  const lowStockList = data.productosAgotarse || [];
+  const expiringList = data.productosVencimiento || [];
+
+  let unseenCount = 0;
+  lowStockList.forEach(p => {
+    const seenStock = localStorage.getItem(`seen_stock_${p.id}`);
+    if (seenStock !== String(p.stock)) {
+      unseenCount++;
+    }
+  });
+  expiringList.forEach(p => {
+    const seenVenc = localStorage.getItem(`seen_venc_${p.id}`);
+    if (seenVenc !== String(p.fecha_vencimiento)) {
+      unseenCount++;
+    }
+  });
+
+  if (unseenCount > 0) {
+    badge.textContent = unseenCount;
+    badge.style.display = 'flex';
+    if (countSpan) countSpan.textContent = unseenCount;
+  } else {
+    badge.style.display = 'none';
+    if (countSpan) countSpan.textContent = '0';
+  }
+
+  let html = '';
+
+  const totalNotifications = lowStockList.length + expiringList.length;
+
+  if (totalNotifications === 0) {
+    html = `
+      <div style="padding:15px;text-align:center;color:var(--gray-300);font-size:13px">
+        <i class="fas fa-bell-slash" style="font-size:24px;margin-bottom:8px;display:block"></i>
+        No tienes notificaciones pendientes
+      </div>
+    `;
+  } else {
+    if (unseenCount > 0) {
+      html += `
+        <div style="display:flex;justify-content:flex-end;padding:4px 8px;border-bottom:1px solid var(--gray-100)">
+          <button class="btn btn-sm btn-outline" onclick="marcarNotificacionesLeidas()" style="padding:2px 8px;font-size:11px"><i class="fas fa-check"></i> Marcar como leídas</button>
+        </div>
+      `;
+    }
+
+    lowStockList.forEach(p => {
+      const isOut = p.stock === 0;
+      const isSeen = localStorage.getItem(`seen_stock_${p.id}`) === String(p.stock);
+      const bgOpacity = isSeen ? '0.01' : '0.04';
+      const textStyle = isSeen ? 'color:var(--gray-300);font-weight:400' : 'font-weight:700;color:var(--dark)';
+      html += `
+        <div class="notification-item" onclick="window._invFilterType = 'bajo_stock'; cargarModulo('inventario', true); toggleNotifications()" style="padding:8px;cursor:pointer;display:flex;align-items:flex-start;gap:10px;font-size:12px;border-bottom:1px solid var(--gray-100);background:rgba(108,92,231,${bgOpacity})">
+          <div style="background:${isOut ? 'rgba(225,112,85,0.1)' : 'rgba(253,203,110,0.2)'};color:${isOut ? 'var(--danger)' : '#B7950B'};border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+            <i class="fas ${isOut ? 'fa-ban' : 'fa-exclamation-triangle'}"></i>
+          </div>
+          <div style="flex:1">
+            <div style="${textStyle}">${p.nombre}</div>
+            <div style="color:var(--gray-300);margin-top:2px">${isOut ? '¡Sin stock disponible!' : `Stock mínimo: ${p.stock}/${p.stock_minimo}`}</div>
+          </div>
+        </div>
+      `;
+    });
+
+    expiringList.forEach(p => {
+      const isUrgent = p.dias_restantes <= 7;
+      const isSeen = localStorage.getItem(`seen_venc_${p.id}`) === String(p.fecha_vencimiento);
+      const bgOpacity = isSeen ? '0.01' : '0.04';
+      const textStyle = isSeen ? 'color:var(--gray-300);font-weight:400' : 'font-weight:700;color:var(--dark)';
+      html += `
+        <div class="notification-item" onclick="window._invFilterType = 'por_vencer'; cargarModulo('inventario', true); toggleNotifications()" style="padding:8px;cursor:pointer;display:flex;align-items:flex-start;gap:10px;font-size:12px;border-bottom:1px solid var(--gray-100);background:rgba(108,92,231,${bgOpacity})">
+          <div style="background:${isUrgent ? 'rgba(225,112,85,0.1)' : 'rgba(108,92,231,0.1)'};color:${isUrgent ? 'var(--danger)' : 'var(--primary)'};border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+            <i class="fas fa-calendar-times"></i>
+          </div>
+          <div style="flex:1">
+            <div style="${textStyle}">${p.nombre}</div>
+            <div style="color:var(--gray-300);margin-top:2px">${p.dias_restantes <= 0 ? '¡Vencido!' : `Pronto a vencer: ${p.dias_restantes} días (${p.fecha_vencimiento})`}</div>
+          </div>
+        </div>
+      `;
+    });
+  }
+
+  listContainer.innerHTML = html;
+}
+
+function marcarNotificacionesLeidas() {
+  const data = window._lastNotifData;
+  if (!data) return;
+  const lowStockList = data.productosAgotarse || [];
+  const expiringList = data.productosVencimiento || [];
+  lowStockList.forEach(p => {
+    localStorage.setItem(`seen_stock_${p.id}`, String(p.stock));
+  });
+  expiringList.forEach(p => {
+    localStorage.setItem(`seen_venc_${p.id}`, String(p.fecha_vencimiento));
+  });
+  actualizarNotificaciones(data);
+}
+
+function handleVentaBarcodeKey(event) {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    const barcode = event.target.value.trim();
+    if (barcode) {
+      agregarProductoPorCodigo(barcode);
+    }
+  }
+}
+
+function agregarProductoPorCodigo(code) {
+  const productos = window._ventasProductos || [];
+  const prod = productos.find(p => p.codigo_barras === code);
+  if (!prod) {
+    Swal.fire({ icon: 'error', title: 'Producto no encontrado', text: `No existe un producto con el código de barras: ${code}`, timer: 2000, showConfirmButton: false });
+    return;
+  }
+  if (prod.stock <= 0) {
+    Swal.fire({ icon: 'error', title: 'Stock insuficiente', text: `El producto "${prod.nombre}" no tiene stock disponible.`, timer: 2000, showConfirmButton: false });
+    return;
+  }
+  
+  const existente = window._ventaItems.find(i => i.id === prod.id);
+  if (existente) {
+    if (existente.cantidad + 1 > prod.stock) {
+      Swal.fire({ icon: 'error', title: 'Stock insuficiente', text: `No puedes agregar más de ${prod.stock} unidades de "${prod.nombre}".`, timer: 2000, showConfirmButton: false });
+      return;
+    }
+    existente.cantidad += 1;
+  } else {
+    window._ventaItems.push({
+      id: prod.id,
+      nombre: prod.nombre,
+      precio: parseFloat(prod.precio_venta),
+      cantidad: 1,
+      stock: prod.stock
+    });
+  }
+  
+  // Reproducir un pitido rápido para feedback de escaneo
+  try {
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const oscillator = audioCtx.createOscillator();
+    const gainNode = audioCtx.createGain();
+    oscillator.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(1000, audioCtx.currentTime);
+    gainNode.gain.setValueAtTime(0.08, audioCtx.currentTime);
+    oscillator.start();
+    oscillator.stop(audioCtx.currentTime + 0.08);
+  } catch (e) {
+    console.error('Audio beep failed', e);
+  }
+
+  actualizarTotalVenta();
+  
+  // Limpiar y re-enfocar la entrada
+  setTimeout(() => {
+    const input = document.getElementById('ventaBarcodeScan');
+    if (input) {
+      input.value = '';
+      input.focus();
+    }
+  }, 50);
+}
+
+// ================ INVENTARIO TABS (DEVOLUCIONES & CALENDARIO) ================
+function switchInventarioTab(tabName) {
+  const btns = document.querySelectorAll('#moduleInventario .tab-btn');
+  btns.forEach(b => b.classList.remove('active'));
+  
+  document.getElementById('inventarioProductosView').style.display = 'none';
+  document.getElementById('inventarioDevolucionesView').style.display = 'none';
+  document.getElementById('inventarioCalendarioView').style.display = 'none';
+  
+  if (tabName === 'productos') {
+    document.getElementById('tabInvProductos').classList.add('active');
+    document.getElementById('inventarioProductosView').style.display = 'block';
+  } else if (tabName === 'devoluciones') {
+    document.getElementById('tabInvDevoluciones').classList.add('active');
+    document.getElementById('inventarioDevolucionesView').style.display = 'block';
+    cargarDevoluciones();
+  } else if (tabName === 'calendario') {
+    document.getElementById('tabInvCalendario').classList.add('active');
+    document.getElementById('inventarioCalendarioView').style.display = 'block';
+    cargarCalendarioProveedores();
+  }
+}
+
+async function cargarDevoluciones() {
+  const tbody = document.getElementById('tablaDevoluciones');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted" style="padding:20px">Cargando devoluciones...</td></tr>';
+  try {
+    const data = await request('/inventario/devoluciones');
+    const fmt = n => '$' + Number(n).toLocaleString('es-CO');
+    tbody.innerHTML = data.length ? data.map(d => {
+      const isPendiente = d.estado === 'pendiente';
+      return `
+        <tr>
+          <td>${d.created_at}</td>
+          <td><code>${d.codigo_barras || '-'}</code></td>
+          <td><strong>${d.producto_nombre}</strong></td>
+          <td>${d.proveedor_nombre}</td>
+          <td>${d.cantidad}</td>
+          <td>${fmt(d.precio_compra)}</td>
+          <td><span class="status-badge warning">${d.motivo.toUpperCase()}</span></td>
+          <td><span class="status-badge ${isPendiente ? 'danger' : 'success'}">${d.estado.toUpperCase()}</span></td>
+          <td>
+            ${isPendiente ? `
+              <button class="btn btn-sm btn-success" onclick="marcarDevolucionEstado(${d.id}, 'devuelto')" title="Completar Devolución"><i class="fas fa-check"></i> Entregado</button>
+            ` : '-'}
+          </td>
+        </tr>
+      `;
+    }).join('') : '<tr><td colspan="9" class="text-center text-muted" style="padding:20px">No hay devoluciones registradas</td></tr>';
+  } catch (err) { tbody.innerHTML = `<tr><td colspan="9" class="text-center text-danger" style="padding:20px">Error: ${err.message}</td></tr>`; }
+}
+
+function mostrarFormDevolucion() {
+  const prods = window._invProductos || [];
+  const provs = window._invProveedores || [];
+  abrirModal('Registrar Devolución a Proveedor', `
+    <form id="formDevolucion">
+      <div class="form-group">
+        <label>Seleccionar Producto</label>
+        <select id="devProductoId" onchange="actualizarMaxDevolucion(this.value)">
+          <option value="">Seleccione un producto...</option>
+          ${prods.map(p => `<option value="${p.id}" data-stock="${p.stock}">${p.nombre} (Stock: ${p.stock})</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Cantidad a Devolver (Máximo disponible: <span id="devMaxStock">0</span>)</label>
+        <input type="number" id="devCantidad" min="1" value="1" required>
+      </div>
+      <div class="form-group">
+        <label>Proveedor</label>
+        <select id="devProveedorId">
+          <option value="">Seleccione un proveedor...</option>
+          ${provs.map(p => `<option value="${p.id}">${p.nombre_empresa}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Motivo de Devolución</label>
+        <select id="devMotivo">
+          <option value="vencido">Producto Vencido</option>
+          <option value="defectuoso">Defecto de Fábrica / Avería</option>
+          <option value="otro">Otro motivo</option>
+        </select>
+      </div>
+    </form>
+  `, `<button class="btn btn-primary" onclick="guardarDevolucion()"><i class="fas fa-save"></i> Registrar Devolución</button>`);
+}
+
+function actualizarMaxDevolucion(prodId) {
+  const select = document.getElementById('devProductoId');
+  if (!select.value) {
+    document.getElementById('devMaxStock').textContent = '0';
+    return;
+  }
+  const option = select.selectedOptions[0];
+  const stock = option.dataset.stock;
+  document.getElementById('devMaxStock').textContent = stock;
+  document.getElementById('devCantidad').max = stock;
+}
+
+async function guardarDevolucion() {
+  const producto_id = parseInt(document.getElementById('devProductoId').value);
+  const proveedor_id = parseInt(document.getElementById('devProveedorId').value);
+  const cantidad = parseInt(document.getElementById('devCantidad').value);
+  const motivo = document.getElementById('devMotivo').value;
+
+  if (!producto_id || !proveedor_id || !cantidad || !motivo) {
+    return Swal.fire({ icon: 'error', title: 'Campos requeridos', text: 'Por favor completa todos los campos del formulario.' });
+  }
+
+  const maxStock = parseInt(document.getElementById('devMaxStock').textContent);
+  if (cantidad > maxStock) {
+    return Swal.fire({ icon: 'error', title: 'Cantidad inválida', text: `No puedes devolver más productos de los disponibles en stock (${maxStock}).` });
+  }
+
+  try {
+    await request('/inventario/devoluciones', {
+      method: 'POST',
+      body: JSON.stringify({ producto_id, proveedor_id, cantidad, motivo })
+    });
+    cerrarModal();
+    Swal.fire({ icon: 'success', title: 'Devolución registrada', text: 'El stock fue descontado y auditado.', timer: 2000, showConfirmButton: false });
+    
+    const [p] = await Promise.all([request('/inventario')]);
+    window._invProductos = p;
+    cargarDevoluciones();
+  } catch (err) { Swal.fire({ icon: 'error', title: 'Error', text: err.message }); }
+}
+
+async function marcarDevolucionEstado(id, estado) {
+  try {
+    await request(`/inventario/devoluciones/${id}/estado`, {
+      method: 'PUT',
+      body: JSON.stringify({ estado })
+    });
+    Swal.fire({ icon: 'success', title: 'Estado actualizado', timer: 1500, showConfirmButton: false });
+    cargarDevoluciones();
+  } catch (err) { Swal.fire({ icon: 'error', title: 'Error', text: err.message }); }
+}
+
+async function cargarCalendarioProveedores() {
+  const container = document.getElementById('calendarioVisitasList');
+  if (!container) return;
+  container.innerHTML = '<p class="text-center text-muted">Cargando agenda de visitas...</p>';
+  try {
+    const [visitas, devoluciones] = await Promise.all([
+      request('/inventario/proveedores/visitas'),
+      request('/inventario/devoluciones')
+    ]);
+
+    const prods = window._invProductos || [];
+
+    container.innerHTML = visitas.length ? visitas.map(v => {
+      const lowStockProds = prods.filter(p => p.proveedor_id === v.proveedor_id && p.stock <= p.stock_minimo);
+      const pendingReturns = devoluciones.filter(d => d.proveedor_id === v.proveedor_id && d.estado === 'pendiente');
+
+      let alertHtml = '';
+      if (lowStockProds.length > 0 || pendingReturns.length > 0) {
+        alertHtml = `
+          <div style="background:rgba(253,203,110,0.15);border:1px solid rgba(253,203,110,0.4);border-radius:var(--radius-sm);padding:12px;margin-top:10px;font-size:13px">
+            <strong style="color:#B7950B"><i class="fas fa-exclamation-circle"></i> Información relevante para la visita:</strong>
+            <ul style="margin:5px 0 0 15px;padding:0;line-height:1.5">
+              ${lowStockProds.length ? `<li style="color:#B7950B"><strong>Falta stock:</strong> Se deben comprar ${lowStockProds.length} productos con stock crítico: <em>${lowStockProds.map(p => `${p.nombre} (${p.stock}/${p.stock_minimo})`).join(', ')}</em></li>` : ''}
+              ${pendingReturns.length ? `<li style="color:var(--danger)"><strong>Devoluciones pendientes:</strong> Hay ${pendingReturns.length} devoluciones por entregar: <em>${pendingReturns.map(d => `${d.producto_nombre} (x${d.cantidad})`).join(', ')}</em></li>` : ''}
+            </ul>
+          </div>
+        `;
+      }
+
+      return `
+        <div class="card" style="border:1px solid var(--gray-200);box-shadow:none;transition:var(--transition)">
+          <div class="card-body" style="padding:15px;display:flex;flex-direction:column;gap:10px">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start">
+              <div>
+                <h5 style="margin:0;font-size:15px;font-weight:700">${v.proveedor_nombre}</h5>
+                <p style="font-size:12px;color:var(--gray-300);margin:2px 0 0 0">
+                  <i class="fas fa-calendar-day"></i> Fecha agendada: <strong>${v.fecha_visita}</strong>
+                </p>
+              </div>
+              <button class="btn btn-sm btn-danger" onclick="eliminarVisita(${v.id})" title="Eliminar visita"><i class="fas fa-trash"></i></button>
+            </div>
+            
+            ${v.notes ? `<p style="font-size:13px;background:var(--gray-100);padding:8px 10px;border-radius:4px;margin:5px 0"><strong>Notas de visita:</strong> ${v.notes}</p>` : ''}
+            
+            <div style="font-size:12px;color:var(--gray-300);display:flex;gap:15px;margin-top:2px">
+              <span><i class="fas fa-user"></i> Contacto: ${v.contacto_nombre || '-'}</span>
+              <span><i class="fas fa-phone"></i> Tel: <a href="tel:${v.contacto_telefono}" style="color:inherit;text-decoration:none">${v.contacto_telefono || '-'}</a></span>
+            </div>
+
+            ${alertHtml}
+          </div>
+        </div>
+      `;
+    }).join('') : '<div class="text-center text-muted" style="padding:30px">No hay visitas de proveedores agendadas</div>';
+  } catch (err) { container.innerHTML = `<p class="text-center text-danger">Error: ${err.message}</p>`; }
+}
+
+function mostrarFormVisita() {
+  const provs = window._invProveedores || [];
+  abrirModal('Agendar Visita de Proveedor', `
+    <form id="formVisita">
+      <div class="form-group">
+        <label>Seleccionar Proveedor</label>
+        <select id="visProveedorId">
+          <option value="">Seleccione un proveedor...</option>
+          ${provs.map(p => `<option value="${p.id}">${p.nombre_empresa}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Fecha de Visita</label>
+        <input type="date" id="visFecha" min="${new Date().toISOString().split('T')[0]}" required>
+      </div>
+      <div class="form-group">
+        <label>Notas / Recordatorios</label>
+        <textarea id="visNotas" placeholder="Ej: Negociar descuento, verificar facturas pendientes..."></textarea>
+      </div>
+    </form>
+  `, `<button class="btn btn-primary" onclick="guardarVisita()"><i class="fas fa-save"></i> Agendar Visita</button>`);
+}
+
+async function guardarVisita() {
+  const proveedor_id = parseInt(document.getElementById('visProveedorId').value);
+  const fecha_visita = document.getElementById('visFecha').value;
+  const notas = document.getElementById('visNotas').value.trim();
+
+  if (!proveedor_id || !fecha_visita) {
+    return Swal.fire({ icon: 'error', title: 'Campos requeridos', text: 'Proveedor y fecha son campos obligatorios.' });
+  }
+
+  try {
+    await request('/inventario/proveedores/visitas', {
+      method: 'POST',
+      body: JSON.stringify({ proveedor_id, fecha_visita, notas })
+    });
+    cerrarModal();
+    Swal.fire({ icon: 'success', title: 'Visita agendada', timer: 1500, showConfirmButton: false });
+    cargarCalendarioProveedores();
+  } catch (err) { Swal.fire({ icon: 'error', title: 'Error', text: err.message }); }
+}
+
+async function eliminarVisita(id) {
+  const result = await Swal.fire({
+    title: '¿Eliminar Visita?',
+    text: 'Esta acción no se puede deshacer.',
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonText: 'Sí, eliminar',
+    cancelButtonText: 'Cancelar'
+  });
+  if (!result.isConfirmed) return;
+  try {
+    await request(`/inventario/proveedores/visitas/${id}`, { method: 'DELETE' });
+    Swal.fire({ icon: 'success', title: 'Visita eliminada', timer: 1500, showConfirmButton: false });
+    cargarCalendarioProveedores();
+  } catch (err) { Swal.fire({ icon: 'error', title: 'Error', text: err.message }); }
+}
+
+// ================ AUDITORIA TABS (SESIONES CAJA & REPORTES FINANCIEROS) ================
+function switchLogsTab(tabName) {
+  const btns = document.querySelectorAll('#moduleLogs .tab-btn');
+  btns.forEach(b => b.classList.remove('active'));
+
+  document.getElementById('logsAccionesView').style.display = 'none';
+  document.getElementById('logsSesionesView').style.display = 'none';
+  document.getElementById('logsReportesView').style.display = 'none';
+
+  if (tabName === 'logs') {
+    document.getElementById('tabLogsAcciones').classList.add('active');
+    document.getElementById('logsAccionesView').style.display = 'block';
+  } else if (tabName === 'sesiones') {
+    document.getElementById('tabLogsSesiones').classList.add('active');
+    document.getElementById('logsSesionesView').style.display = 'block';
+    cargarSesionesCaja();
+  } else if (tabName === 'reportes') {
+    document.getElementById('tabLogsReportes').classList.add('active');
+    document.getElementById('logsReportesView').style.display = 'block';
+  }
+}
+
+async function cargarSesionesCaja() {
+  const tbody = document.getElementById('tablaSesionesCaja');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted" style="padding:20px">Cargando sesiones de caja...</td></tr>';
+  try {
+    const data = await request('/apertura/historial');
+    const fmt = n => '$' + Number(n).toLocaleString('es-CO');
+    tbody.innerHTML = data.length ? data.map(s => {
+      const isApertura = s.tipo === 'apertura';
+      const statusLabel = s.monto_final !== null ? 'Cerrada' : 'Abierta';
+      const diff = s.monto_final !== null ? (s.monto_final - s.monto_inicial) : 0;
+      return `
+        <tr>
+          <td>${s.created_at}</td>
+          <td><strong>${s.usuario_nombre}</strong></td>
+          <td>${fmt(s.monto_inicial)}</td>
+          <td>${s.monto_final !== null ? fmt(s.monto_final) : '-'}</td>
+          <td>${s.monto_final !== null ? fmt(diff) : '-'}</td>
+          <td><span class="status-badge ${s.monto_final !== null ? 'success' : 'danger'}">${statusLabel.toUpperCase()}</span></td>
+          <td>
+            <button class="btn btn-sm btn-info" onclick="imprimirDetalleSesion(${s.id})" title="Imprimir Detalle de Caja"><i class="fas fa-print"></i> Historial</button>
+          </td>
+        </tr>
+      `;
+    }).join('') : '<tr><td colspan="7" class="text-center text-muted" style="padding:20px">No hay sesiones registradas</td></tr>';
+  } catch (err) { tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger" style="padding:20px">Error: ${err.message}</td></tr>`; }
+}
+
+async function imprimirDetalleSesion(id) {
+  try {
+    const data = await request(`/logs/historial-sesion/${id}`);
+    const s = data.session;
+    const sales = data.sales || [];
+    const salesDetails = data.salesDetails || [];
+    const logs = data.logs || [];
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return Swal.fire({ icon: 'error', title: 'Bloqueador de ventanas emergentes activo', text: 'Por favor permite ventanas emergentes para imprimir.' });
+
+    const fmt = n => '$' + Number(n).toLocaleString('es-CO');
+
+    let itemsHtml = '';
+    salesDetails.forEach(item => {
+      itemsHtml += `
+        <tr>
+          <td>${item.codigo_barras || '-'}</td>
+          <td>${item.producto_nombre}</td>
+          <td>${item.cantidad}</td>
+          <td>${fmt(item.precio_unitario)}</td>
+          <td>${fmt(item.subtotal)}</td>
+        </tr>
+      `;
+    });
+
+    let salesHtml = '';
+    sales.forEach(sale => {
+      salesHtml += `
+        <tr>
+          <td>#${sale.id}</td>
+          <td>${sale.created_at}</td>
+          <td>${sale.metodo_pago.toUpperCase()}</td>
+          <td>${fmt(sale.total)}</td>
+        </tr>
+      `;
+    });
+
+    let logsHtml = '';
+    logs.forEach(log => {
+      logsHtml += `
+        <li>[${log.created_at}] <strong>${log.accion}</strong>: ${log.detalle || ''}</li>
+      `;
+    });
+
+    const diff = s.monto_final !== null ? (s.monto_final - (s.monto_inicial + sales.reduce((sum, v) => sum + v.total, 0))) : 0;
+    const diffText = diff === 0 ? 'Caja Cuadrada' : diff > 0 ? `Sobrante: ${fmt(diff)}` : `Faltante: ${fmt(Math.abs(diff))}`;
+
+    printWindow.document.write(`
+      <html>
+      <head>
+        <title>Auditoría de Caja - Sesión #${s.id}</title>
+        <style>
+          body { font-family: 'Outfit', 'Inter', sans-serif; padding: 20px; color: #333; }
+          .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
+          h2 { margin: 5px 0; }
+          .section { margin-bottom: 20px; }
+          .section-title { font-weight: bold; font-size: 16px; border-bottom: 1px solid #ddd; padding-bottom: 5px; margin-bottom: 10px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+          th { background-color: #f5f5f5; }
+          .totals { font-size: 14px; font-weight: bold; margin-top: 10px; text-align: right; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h2>AUDITORÍA DE CAJA - SESIÓN #${s.id}</h2>
+          <p><strong>Tienda:</strong> ${window._storeConfig?.tienda_nombre || 'TuTienda'}</p>
+          <p><strong>Cajero responsable:</strong> ${s.usuario_nombre}</p>
+        </div>
+
+        <div class="section">
+          <div class="section-title">Resumen Financiero de Sesión</div>
+          <table>
+            <tr><th>Monto Inicial</th><td>${fmt(s.monto_inicial)}</td></tr>
+            <tr><th>Ingresos por Ventas</th><td>${fmt(sales.reduce((sum, v) => sum + v.total, 0))}</td></tr>
+            <tr><th>Monto Final Reportado</th><td>${s.monto_final !== null ? fmt(s.monto_final) : 'Caja Aún Abierta'}</td></tr>
+            <tr><th>Estado / Desfase</th><td><strong>${diffText}</strong></td></tr>
+          </table>
+          <p><strong>Observaciones:</strong> ${s.observaciones || 'Sin observaciones'}</p>
+        </div>
+
+        <div class="section">
+          <div class="section-title">Ventas Registradas (${sales.length})</div>
+          <table>
+            <thead>
+              <tr><th>Venta ID</th><th>Fecha</th><th>Método de Pago</th><th>Total</th></tr>
+            </thead>
+            <tbody>
+              ${salesHtml || '<tr><td colspan="4">No se registraron ventas en esta sesión</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="section">
+          <div class="section-title">Productos Vendidos (Desglose)</div>
+          <table>
+            <thead>
+              <tr><th>Código</th><th>Producto</th><th>Cantidad</th><th>Precio Unitario</th><th>Subtotal</th></tr>
+            </thead>
+            <tbody>
+              ${itemsHtml || '<tr><td colspan="5">No se vendieron productos en esta sesión</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="section">
+          <div class="section-title">Bitácora de Auditoría (Logs de Sesión)</div>
+          <ul style="font-size: 12px; line-height: 1.6; padding-left: 20px;">
+            ${logsHtml || '<li>No hay logs registrados para este usuario en este rango de tiempo</li>'}
+          </ul>
+        </div>
+
+        <script>
+          window.onload = function() { window.print(); window.close(); }
+        </script>
+      </body>
+      </html>
+    `);
+    printWindow.document.close();
+  } catch (err) { Swal.fire({ icon: 'error', title: 'Error al generar impresión', text: err.message }); }
+}
+
+async function generarReporteFinanciero() {
+  const periodo = document.getElementById('repPeriodo').value;
+  const fecha = document.getElementById('repFecha').value;
+  const resultBox = document.getElementById('reporteFinancieroResultBox');
+  if (!fecha) return;
+
+  resultBox.innerHTML = '<div class="text-center" style="padding:30px"><div class="loader-ripple"><div></div><div></div></div><p class="mt-10 text-muted">Generando reporte financiero...</p></div>';
+  try {
+    const estado = await request('/apertura/estado');
+    if (estado.abierto) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'Caja Abierta',
+        text: 'No se pueden generar reportes mientras la caja esté abierta. Por favor, realice el cierre de caja primero.'
+      });
+      resultBox.innerHTML = '<div class="alert alert-warning"><i class="fas fa-exclamation-triangle"></i> Debe cerrar la caja para generar reportes.</div>';
+      return;
+    }
+    const data = await request(`/logs/reporte-financiero?periodo=${periodo}&fecha=${fecha}`);
+    window._lastReportData = data;
+
+    const fmt = n => '$' + Number(n).toLocaleString('es-CO');
+
+    resultBox.innerHTML = `
+      <div style="display:flex;justify-content:flex-end;margin-bottom:15px">
+        <button class="btn btn-secondary" onclick="imprimirReporteFinanciero()"><i class="fas fa-print"></i> Imprimir Reporte</button>
+      </div>
+      <div class="stats-grid" style="grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));margin-bottom:20px">
+        <div class="stat-card" style="border-left:4px solid var(--secondary)">
+          <div class="stat-value" style="color:var(--secondary)">${fmt(data.ingresosVentas)}</div>
+          <div class="stat-label">Ingresos por Ventas</div>
+        </div>
+        <div class="stat-card" style="border-left:4px solid var(--danger)">
+          <div class="stat-value" style="color:var(--danger)">${fmt(data.totalGastos)}</div>
+          <div class="stat-label">Gastos Totales</div>
+          <div style="font-size:11px;color:var(--gray-300);margin-top:4px">
+            Costo Ventas: ${fmt(data.costoMercanciaVendida)}<br>
+            Pérdidas: ${fmt(data.perdidasSalidas)}<br>
+            Compras: ${fmt(data.comprasEntradas)}
+          </div>
+        </div>
+        <div class="stat-card" style="border-left:4px solid ${data.utilidadNeta >= 0 ? 'var(--success)' : 'var(--danger)'}">
+          <div class="stat-value" style="color:${data.utilidadNeta >= 0 ? 'var(--success)' : 'var(--danger)'}">${fmt(data.utilidadNeta)}</div>
+          <div class="stat-label">Utilidad Neta</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-header"><h4>Desglose de Ventas (Ingresos)</h4></div>
+        <div class="card-body" style="padding:0">
+          <div class="table-container">
+            <table>
+              <thead><tr><th>ID</th><th>Fecha</th><th>Vendedor</th><th>Método de Pago</th><th>Total</th></tr></thead>
+              <tbody>
+                ${data.sales.length ? data.sales.map(v => `
+                  <tr>
+                    <td>#${v.id}</td>
+                    <td>${v.created_at}</td>
+                    <td>${v.vendedor}</td>
+                    <td>${v.metodo_pago.toUpperCase()}</td>
+                    <td><strong>${fmt(v.total)}</strong></td>
+                  </tr>
+                `).join('') : '<tr><td colspan="5" class="text-center text-muted" style="padding:20px">No hay ventas en este período</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-header"><h4>Mercancía Vendida (Detalle)</h4></div>
+        <div class="card-body" style="padding:0">
+          <div class="table-container">
+            <table>
+              <thead><tr><th>Fecha</th><th>Producto</th><th>Cantidad</th><th>Precio Venta</th><th>Costo Compra</th><th>Utilidad</th></tr></thead>
+              <tbody>
+                ${data.salesDetails.length ? data.salesDetails.map(d => `
+                  <tr>
+                    <td>${d.created_at}</td>
+                    <td><strong>${d.nombre}</strong></td>
+                    <td>${d.cantidad}</td>
+                    <td>${fmt(d.precio_unitario)}</td>
+                    <td>${fmt(d.precio_compra)} (Gasto)</td>
+                    <td style="color:var(--success)"><strong>${fmt(d.subtotal - (d.cantidad * d.precio_compra))}</strong></td>
+                  </tr>
+                `).join('') : '<tr><td colspan="6" class="text-center text-muted" style="padding:20px">No hay productos vendidos en este período</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><h4>Movimientos y Ajustes de Inventario (Compras / Salidas)</h4></div>
+        <div class="card-body" style="padding:0">
+          <div class="table-container">
+            <table>
+              <thead><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th>Cantidad</th><th>Costo unitario</th><th>Total</th><th>Motivo</th></tr></thead>
+              <tbody>
+                ${data.movements.length ? data.movements.map(m => {
+                  const isSale = m.motivo.startsWith('Venta #');
+                  if (isSale) return '';
+                  const isEntrada = m.tipo === 'entrada';
+                  const valor = isEntrada ? (m.precio_compra || m.prod_precio_compra) : m.prod_precio_compra;
+                  return `
+                    <tr>
+                      <td>${m.created_at}</td>
+                      <td><strong>${m.producto_nombre}</strong></td>
+                      <td><span class="status-badge ${isEntrada ? 'success' : 'danger'}">${m.tipo.toUpperCase()}</span></td>
+                      <td>${m.cantidad}</td>
+                      <td>${fmt(valor)}</td>
+                      <td><strong>${fmt(m.cantidad * valor)}</strong></td>
+                      <td style="font-size:11px;color:var(--gray-300)">${m.motivo || '-'}</td>
+                    </tr>
+                  `;
+                }).join('') : '<tr><td colspan="7" class="text-center text-muted" style="padding:20px">No hay movimientos de inventario en este período</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    `;
+  } catch (err) { resultBox.innerHTML = `<div class="alert alert-danger">${err.message}</div>`; }
+}
+
+function imprimirReporteFinanciero() {
+  const data = window._lastReportData;
+  if (!data) return;
+
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) return Swal.fire({ icon: 'error', title: 'Bloqueador de ventanas emergentes activo', text: 'Por favor permite ventanas emergentes para imprimir.' });
+
+  const fmt = n => '$' + Number(n).toLocaleString('es-CO');
+
+  let salesHtml = '';
+  data.sales.forEach(v => {
+    salesHtml += `
+      <tr>
+        <td>#${v.id}</td>
+        <td>${v.created_at}</td>
+        <td>${v.vendedor}</td>
+        <td>${v.metodo_pago.toUpperCase()}</td>
+        <td>${fmt(v.total)}</td>
+      </tr>
+    `;
+  });
+
+  let detailsHtml = '';
+  data.salesDetails.forEach(d => {
+    detailsHtml += `
+      <tr>
+        <td>${d.created_at}</td>
+        <td>${d.nombre}</td>
+        <td>${d.cantidad}</td>
+        <td>${fmt(d.precio_unitario)}</td>
+        <td>${fmt(d.precio_compra)}</td>
+        <td>${fmt(d.subtotal - (d.cantidad * d.precio_compra))}</td>
+      </tr>
+    `;
+  });
+
+  let movementsHtml = '';
+  data.movements.forEach(m => {
+    if (m.motivo.startsWith('Venta #')) return;
+    const isEntrada = m.tipo === 'entrada';
+    const valor = isEntrada ? (m.precio_compra || m.prod_precio_compra) : m.prod_precio_compra;
+    movementsHtml += `
+      <tr>
+        <td>${m.created_at}</td>
+        <td>${m.producto_nombre}</td>
+        <td>${m.tipo.toUpperCase()}</td>
+        <td>${m.cantidad}</td>
+        <td>${fmt(valor)}</td>
+        <td>${fmt(m.cantidad * valor)}</td>
+        <td>${m.motivo || '-'}</td>
+      </tr>
+    `;
+  });
+
+  printWindow.document.write(`
+    <html>
+    <head>
+      <title>Reporte Financiero de Ingresos y Gastos</title>
+      <style>
+        body { font-family: 'Outfit', 'Inter', sans-serif; padding: 20px; color: #333; }
+        .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
+        h2 { margin: 5px 0; }
+        .section { margin-bottom: 20px; }
+        .section-title { font-weight: bold; font-size: 16px; border-bottom: 1px solid #ddd; padding-bottom: 5px; margin-bottom: 10px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
+        th, td { border: 1px solid #ddd; padding: 6px; text-align: left; }
+        th { background-color: #f5f5f5; }
+        .summary-box { display: flex; gap: 15px; margin-bottom: 20px; }
+        .summary-card { flex: 1; border: 1px solid #ddd; border-radius: 4px; padding: 12px; text-align: center; }
+        .summary-card .value { font-size: 18px; font-weight: bold; margin-top: 5px; }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <h2>REPORTE FINANCIERO DE INGRESOS Y GASTOS</h2>
+        <p><strong>Tienda:</strong> ${window._storeConfig?.tienda_nombre || 'TuTienda'}</p>
+        <p><strong>Periodo:</strong> ${data.periodo.toUpperCase()} (Ref: ${data.fecha})</p>
+        <p><strong>Rango:</strong> ${data.startDate} al ${data.endDate}</p>
+      </div>
+
+      <div class="summary-box">
+        <div class="summary-card">
+          <div>Ingresos por Ventas</div>
+          <div class="value" style="color:#00cec9">${fmt(data.ingresosVentas)}</div>
+        </div>
+        <div class="summary-card">
+          <div>Gastos Totales</div>
+          <div class="value" style="color:#d63031">${fmt(data.totalGastos)}</div>
+          <div style="font-size:10px;color:#777;margin-top:4px">
+            Costo Ventas: ${fmt(data.costoMercanciaVendida)} | 
+            Pérdidas: ${fmt(data.perdidasSalidas)} | 
+            Compras: ${fmt(data.comprasEntradas)}
+          </div>
+        </div>
+        <div class="summary-card">
+          <div>Utilidad Neta</div>
+          <div class="value" style="color:${data.utilidadNeta >= 0 ? '#2ecc71' : '#d63031'}">${fmt(data.utilidadNeta)}</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Desglose de Ventas (Ingresos)</div>
+        <table>
+          <thead><tr><th>ID</th><th>Fecha</th><th>Vendedor</th><th>Método de Pago</th><th>Total</th></tr></thead>
+          <tbody>${salesHtml || '<tr><td colspan="5">No se registraron ventas en este período</td></tr>'}</tbody>
+        </table>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Detalle de Mercancía Vendida (Gastos de Mercancía)</div>
+        <table>
+          <thead><tr><th>Fecha</th><th>Producto</th><th>Cantidad</th><th>Precio Venta</th><th>Costo Compra</th><th>Utilidad</th></tr></thead>
+          <tbody>${detailsHtml || '<tr><td colspan="6">No hay mercancía vendida en este período</td></tr>'}</tbody>
+        </table>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Movimientos y Ajustes de Inventario (Pérdidas y Compras)</div>
+        <table>
+          <thead><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th>Cantidad</th><th>Costo unitario</th><th>Total</th><th>Motivo</th></tr></thead>
+          <tbody>${movementsHtml || '<tr><td colspan="7">No se registraron movimientos en este período</td></tr>'}</tbody>
+        </table>
+      </div>
+
+      <script>
+        window.onload = function() { window.print(); window.close(); }
+      </script>
+    </body>
+    </html>
+  `);
+  printWindow.document.close();
+}
