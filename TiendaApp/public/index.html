@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="es-CO">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#1a1a2e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="description" content="TuTienda by ChrizDev - Software de administracion para tu negocio">
+  <title>TuTienda by ChrizDev - Software de Administracion</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .landing-page { min-height: 100vh; background: var(--gray-900); color: var(--white); overflow-x: hidden; display: none; }
+    .landing-page.active { display: block; }
+    .landing-header { position: fixed; top: 0; left: 0; right: 0; z-index: 100; padding: 15px 40px; display: flex; align-items: center; justify-content: space-between; background: rgba(26,26,46,0.9); backdrop-filter: blur(10px); border-bottom: 1px solid rgba(255,255,255,0.05); }
+    .landing-header .logo { font-size: 22px; font-weight: 800; background: linear-gradient(135deg, #A29BFE, #00CEC9); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .landing-header nav { display: flex; gap: 10px; align-items: center; }
+    .landing-header nav a { color: rgba(255,255,255,0.7); text-decoration: none; padding: 8px 18px; border-radius: 8px; font-size: 14px; font-weight: 500; transition: all 0.3s; cursor: pointer; }
+    .landing-header nav a:hover { color: var(--white); background: rgba(255,255,255,0.05); }
+    .landing-header nav a.btn-primary-custom { background: linear-gradient(135deg, var(--primary), var(--primary-dark)); color: var(--white); padding: 10px 24px; border-radius: 10px; font-weight: 600; }
+    .landing-header nav a.btn-primary-custom:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(108,92,231,0.3); }
+
+    .hero { min-height: 100vh; display: flex; align-items: center; justify-content: center; text-align: center; padding: 120px 20px 80px; position: relative; overflow: hidden; background: linear-gradient(135deg, var(--gray-900) 0%, var(--gray-800) 50%, var(--gray-700) 100%); }
+    .hero-bg { position: absolute; width: 100%; height: 100%; top: 0; left: 0; overflow: hidden; pointer-events: none; }
+    .hero-bg-circle { position: absolute; border-radius: 50%; filter: blur(80px); opacity: 0.15; }
+    .hero-bg-circle:nth-child(1) { width: 600px; height: 600px; background: var(--primary); top: -200px; right: -200px; animation: float 10s ease-in-out infinite; }
+    .hero-bg-circle:nth-child(2) { width: 400px; height: 400px; background: var(--secondary); bottom: -100px; left: -100px; animation: float 12s ease-in-out infinite reverse; }
+    .hero-bg-circle:nth-child(3) { width: 300px; height: 300px; background: var(--accent); top: 50%; left: 50%; transform: translate(-50%, -50%); animation: float 8s ease-in-out infinite 2s; }
+    .hero-content { position: relative; z-index: 1; max-width: 800px; animation: fadeIn 0.8s ease; }
+    .hero h1 { font-size: clamp(36px, 6vw, 64px); font-weight: 800; line-height: 1.1; margin-bottom: 20px; }
+    .hero h1 span { background: linear-gradient(135deg, var(--primary-light), var(--secondary)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .hero p { font-size: clamp(16px, 2vw, 20px); color: rgba(255,255,255,0.6); max-width: 600px; margin: 0 auto 35px; line-height: 1.6; }
+    .hero-badges { display: flex; justify-content: center; gap: 15px; flex-wrap: wrap; margin-bottom: 40px; }
+    .hero-badges span { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 8px 18px; border-radius: 20px; font-size: 13px; color: rgba(255,255,255,0.7); }
+    .hero-buttons { display: flex; gap: 15px; justify-content: center; flex-wrap: wrap; }
+
+    .section { padding: 80px 20px; max-width: 1200px; margin: 0 auto; }
+    .section-title { text-align: center; margin-bottom: 50px; }
+    .section-title h2 { font-size: clamp(28px, 4vw, 40px); font-weight: 800; }
+    .section-title p { color: rgba(255,255,255,0.5); font-size: 16px; margin-top: 10px; }
+
+    .features-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; }
+    .feature-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 16px; padding: 30px; transition: all 0.4s; cursor: default; }
+    .feature-card:hover { background: rgba(255,255,255,0.06); border-color: rgba(108,92,231,0.3); transform: translateY(-5px); }
+    .feature-card .feat-icon { width: 56px; height: 56px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 24px; margin-bottom: 18px; }
+    .feature-card h3 { font-size: 18px; font-weight: 700; margin-bottom: 10px; }
+    .feature-card p { color: rgba(255,255,255,0.5); font-size: 14px; line-height: 1.6; }
+
+    .pricing-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 25px; max-width: 1000px; margin: 0 auto; }
+    .pricing-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 20px; padding: 40px 30px; text-align: center; transition: all 0.4s; position: relative; }
+    .pricing-card:hover { transform: translateY(-8px); border-color: rgba(108,92,231,0.4); box-shadow: 0 20px 60px rgba(108,92,231,0.1); }
+    .pricing-card.featured { border-color: var(--primary); background: rgba(108,92,231,0.06); }
+    .pricing-card.featured::before { content: 'RECOMENDADO'; position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: linear-gradient(135deg, var(--primary), var(--primary-dark)); color: var(--white); padding: 4px 20px; border-radius: 20px; font-size: 11px; font-weight: 700; letter-spacing: 1px; }
+    .pricing-card .price { font-size: 42px; font-weight: 800; color: var(--white); margin: 15px 0; }
+    .pricing-card .price small { font-size: 16px; font-weight: 400; color: rgba(255,255,255,0.4); }
+    .pricing-card .price-desc { color: rgba(255,255,255,0.5); font-size: 14px; margin-bottom: 20px; }
+    .pricing-card ul { list-style: none; padding: 0; margin: 0 0 25px; text-align: left; }
+    .pricing-card ul li { padding: 8px 0; font-size: 14px; color: rgba(255,255,255,0.7); display: flex; align-items: center; gap: 10px; }
+    .pricing-card ul li.excluido { opacity: 0.45; }
+    .pricing-card ul li i { width: 18px; }
+    .pricing-card .btn { width: 100%; }
+
+    .cta-section { text-align: center; padding: 80px 20px; background: linear-gradient(135deg, rgba(108,92,231,0.1), rgba(0,206,201,0.05)); }
+    .cta-section h2 { font-size: clamp(28px, 4vw, 40px); font-weight: 800; margin-bottom: 15px; }
+    .cta-section p { color: rgba(255,255,255,0.5); font-size: 16px; margin-bottom: 30px; }
+
+    .landing-footer { text-align: center; padding: 30px; background: rgba(0,0,0,0.3); color: rgba(255,255,255,0.3); font-size: 13px; }
+
+    .auth-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(8px); z-index: 200; display: none; align-items: center; justify-content: center; animation: fadeIn 0.3s ease; }
+    .auth-overlay.active { display: flex; }
+    .auth-modal { background: var(--gray-900); border: 1px solid rgba(255,255,255,0.1); border-radius: 24px; width: 100%; max-width: 440px; padding: 40px; animation: scaleIn 0.4s ease; position: relative; max-height: 90vh; overflow-y: auto; }
+    .auth-close { position: absolute; top: 15px; right: 15px; width: 36px; height: 36px; border: none; background: rgba(255,255,255,0.05); border-radius: 50%; cursor: pointer; font-size: 18px; color: rgba(255,255,255,0.5); transition: all 0.3s; }
+    .auth-close:hover { background: rgba(255,255,255,0.1); color: var(--white); }
+
+    .auth-tabs { display: flex; margin-bottom: 30px; background: rgba(255,255,255,0.05); border-radius: 12px; padding: 4px; }
+    .auth-tab { flex: 1; text-align: center; padding: 12px; border: none; background: transparent; color: rgba(255,255,255,0.4); font-size: 14px; font-weight: 600; cursor: pointer; border-radius: 10px; transition: all 0.3s; font-family: inherit; }
+    .auth-tab.active { background: var(--primary); color: var(--white); box-shadow: 0 4px 15px rgba(108,92,231,0.3); }
+    .auth-form { display: none; }
+    .auth-form.active { display: block; animation: fadeIn 0.3s ease; }
+    .auth-logo { text-align: center; margin-bottom: 25px; }
+    .auth-logo h2 { font-size: 24px; font-weight: 800; background: linear-gradient(135deg, #A29BFE, #00CEC9); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .auth-logo p { color: rgba(255,255,255,0.3); font-size: 12px; letter-spacing: 2px; text-transform: uppercase; margin-top: 4px; }
+
+    .trial-note { text-align: center; margin-top: 15px; padding: 12px; background: rgba(0,206,201,0.08); border: 1px solid rgba(0,206,201,0.15); border-radius: 10px; font-size: 13px; color: var(--secondary); }
+
+    @media (max-width: 768px) {
+      .landing-header { padding: 12px 20px; }
+      .landing-header nav a { font-size: 12px; padding: 6px 12px; }
+      .auth-modal { margin: 15px; padding: 25px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- LANDING PAGE -->
+  <div id="landingPage" class="landing-page active">
+    <header class="landing-header">
+      <div class="logo"><i class="fas fa-store"></i> TuTienda</div>
+      <nav>
+        <a onclick="document.getElementById('featuresSection').scrollIntoView({behavior:'smooth'})">Caracteristicas</a>
+        <a onclick="document.getElementById('pricingSection').scrollIntoView({behavior:'smooth'})">Precios</a>
+        <a onclick="abrirAuth('login')">Iniciar Sesion</a>
+        <a class="btn-primary-custom" onclick="abrirAuth('register')"><i class="fas fa-rocket"></i> Probar Gratis</a>
+      </nav>
+    </header>
+
+    <section class="hero">
+      <div class="hero-bg">
+        <div class="hero-bg-circle"></div>
+        <div class="hero-bg-circle"></div>
+        <div class="hero-bg-circle"></div>
+      </div>
+      <div class="hero-content">
+        <div class="hero-badges">
+          <span><i class="fas fa-shield-alt"></i> ISO 9001:2015</span>
+          <span><i class="fas fa-cloud"></i> Online / Offline</span>
+          <span><i class="fas fa-clock"></i> Tiempo Real</span>
+          <span><i class="fas fa-colombia"></i> Hecho en Colombia</span>
+        </div>
+        <h1>Administra tu tienda con <span>TuTienda by ChrizDev</span></h1>
+        <p>El software de gestion completo que necesitas para controlar inventario, ventas, empleados y mas. Todo en uno, facil y moderno.</p>
+        <div class="hero-buttons">
+          <button class="btn btn-primary btn-lg animate-pulse-ring" onclick="abrirAuth('register')"><i class="fas fa-rocket"></i> Probar Gratis 15 Dias</button>
+          <button class="btn btn-outline btn-lg" onclick="abrirAuth('login')"><i class="fas fa-play"></i> Ver Demo</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="featuresSection">
+      <div class="section-title">
+        <h2>Todo lo que necesitas en un solo lugar</h2>
+        <p>Modulos completamente personalizables para tu negocio</p>
+      </div>
+      <div class="features-grid" id="featuresGrid">
+        <div class="feature-card"><div class="feat-icon" style="background:rgba(108,92,231,0.15);color:var(--primary)"><i class="fas fa-spinner animate-spin"></i></div><h3>Cargando...</h3></div>
+      </div>
+    </section>
+
+    <section class="section" id="pricingSection">
+      <div class="section-title">
+        <h2>Planes para tu negocio</h2>
+        <p>Elige el plan que mejor se adapte a tus necesidades</p>
+      </div>
+      <div class="pricing-grid" id="pricingGrid">
+        <div class="pricing-card"><h3>Cargando ofertas...</h3></div>
+      </div>
+    </section>
+
+    <section class="cta-section">
+      <h2>Listo para empezar?</h2>
+      <p>Prueba TuTienda gratis por 15 dias, sin compromiso. Activa tu tienda en minutos.</p>
+      <button class="btn btn-primary btn-lg animate-pulse-ring" onclick="abrirAuth('register')"><i class="fas fa-rocket"></i> Iniciar Prueba Gratis</button>
+    </section>
+
+    <footer class="landing-footer">
+      &copy; 2025 TuTienda by ChrizDev - Todos los derechos reservados. Hecho en Colombia.
+    </footer>
+  </div>
+
+  <!-- AUTH MODAL -->
+  <div class="auth-overlay" id="authOverlay">
+    <div class="auth-modal">
+      <button class="auth-close" onclick="cerrarAuth()">&times;</button>
+      <div class="auth-logo">
+        <h2><i class="fas fa-store"></i> TuTienda</h2>
+        <p>by ChrizDev</p>
+        <div id="loginLottie" style="width:100px;height:100px;margin:10px auto -5px auto"></div>
+      </div>
+      <div class="auth-tabs">
+        <button class="auth-tab active" id="tabLogin" onclick="cambiarAuthTab('login')"><i class="fas fa-sign-in-alt"></i> Iniciar Sesion</button>
+        <button class="auth-tab" id="tabRegister" onclick="cambiarAuthTab('register')"><i class="fas fa-user-plus"></i> Crear Cuenta</button>
+      </div>
+
+      <form id="loginForm" class="auth-form active">
+        <div class="form-group"><label>Correo Electronico</label><input type="email" id="loginEmail" placeholder="admin@tutienda.com" required autocomplete="email"></div>
+        <div class="form-group"><label>Contrasena</label><input type="password" id="loginPassword" placeholder="••••••••" required autocomplete="current-password"></div>
+        <button type="submit" class="btn btn-primary btn-lg btn-block" id="loginBtn"><i class="fas fa-sign-in-alt"></i> Iniciar Sesion</button>
+        <div style="text-align:center;margin-top:15px;font-size:12px;color:rgba(255,255,255,0.3)"><i class="fas fa-shield-alt"></i> Sistema de Gestion ISO 9001:2015</div>
+      </form>
+
+      <form id="registerForm" class="auth-form">
+        <div class="form-group"><label>Nombre Completo *</label><input type="text" id="regNombre" placeholder="Tu nombre" required></div>
+        <div class="form-group"><label>Correo Electronico *</label><input type="email" id="regEmail" placeholder="correo@ejemplo.com" required></div>
+        <div class="form-group"><label>Telefono</label><input type="text" id="regTelefono" placeholder="+57 300 123 4567"></div>
+        <div class="form-group"><label>Contrasena *</label><input type="password" id="regPassword" placeholder="Minimo 6 caracteres" required minlength="6"></div>
+        <div class="form-group"><label>Confirmar Contrasena *</label><input type="password" id="regPassword2" placeholder="Repite la contrasena" required></div>
+        <div class="trial-note"><i class="fas fa-gift"></i> Registrate y obtienes <strong>15 DIAS DE PRUEBA GRATUITA</strong> sin compromiso</div>
+        <button type="submit" class="btn btn-success btn-lg btn-block" id="registerBtn" style="margin-top:15px"><i class="fas fa-rocket"></i> Crear Cuenta y Empezar</button>
+        <div style="text-align:center;margin-top:12px;font-size:12px;color:rgba(255,255,255,0.3)">Al registrarte aceptas nuestros terminos y condiciones</div>
+      </form>
+    </div>
+  </div>
+
+  <!-- APP LAYOUT -->
+  <div id="appLayout" class="app-layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <h2><i class="fas fa-store"></i> <span id="sidebarStoreName">TuTienda</span></h2>
+        <small>by ChrizDev</small>
+      </div>
+      <div class="sidebar-user">
+        <div class="sidebar-user-avatar" id="userAvatar">U</div>
+        <div class="sidebar-user-info">
+          <strong id="userName">Usuario</strong>
+          <small id="userRole">Admin</small>
+        </div>
+      </div>
+      <nav class="sidebar-nav" id="sidebarNav"></nav>
+      <div class="sidebar-footer">
+        <div class="nav-item" onclick="cerrarSesion()"><span class="nav-icon"><i class="fas fa-sign-out-alt"></i></span> Cerrar Sesion</div>
+      </div>
+    </aside>
+
+    <main class="main-content" id="mainContent">
+      <div id="trialBanner" class="trial-banner" style="display:none;">
+        <p><i class="fas fa-clock"></i> <span id="trialText">Periodo de prueba activo</span></p>
+        <a id="supportLink" href="https://w.app/rtz8lp" target="_blank" class="btn btn-sm"><i class="fab fa-whatsapp"></i> Contactar Soporte</a>
+      </div>
+
+      <header class="main-header">
+        <div style="display:flex;align-items:center;gap:12px">
+          <button class="btn btn-sm btn-outline" onclick="toggleSidebar()" style="color:var(--dark);border-color:var(--gray-200);padding:8px 12px" title="Plegar/Desplegar menu"><i class="fas fa-bars"></i></button>
+          <h1 id="pageTitle">Dashboard</h1>
+        </div>
+        <div class="main-header-right">
+          <div class="header-clock"><span class="clock-dot"></span><span id="relojBogota">--:--:--</span></div>
+          <button class="btn btn-sm btn-outline" onclick="if(event)event.stopPropagation();document.getElementById('installBtn')?.click()" style="color:var(--dark);border-color:var(--gray-200);display:none" id="installBtnWrapper"><i class="fas fa-download"></i></button>
+        </div>
+      </header>
+
+      <div class="page-content">
+        <div id="moduleDashboard" class="module-page active"></div>
+        <div id="moduleInventario" class="module-page"></div>
+        <div id="moduleVentas" class="module-page"></div>
+        <div id="moduleEmpleados" class="module-page"></div>
+        <div id="moduleProveedores" class="module-page"></div>
+        <div id="moduleApertura" class="module-page"></div>
+        <div id="moduleLogs" class="module-page"></div>
+        <div id="moduleConfig" class="module-page"></div>
+        <div id="moduleSuperAdmin" class="module-page"></div>
+        <div id="moduleApi" class="module-page"></div>
+      </div>
+
+      <footer style="text-align:center;padding:15px 30px;font-size:12px;color:var(--gray-300);border-top:1px solid var(--gray-200);" id="appFooter">
+        &copy; 2025 TuTienda by ChrizDev - Todos los derechos reservados
+      </footer>
+    </main>
+  </div>
+
+  <!-- MODAL -->
+  <div class="modal-overlay" id="modalOverlay">
+    <div class="modal" id="modalContent">
+      <div class="modal-header"><h3 id="modalTitle">Modal</h3><button class="modal-close" onclick="cerrarModal()">&times;</button></div>
+      <div class="modal-body" id="modalBody"></div>
+      <div class="modal-footer" id="modalFooter"></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lottie-web@5.12.2/build/player/lottie.min.js"></script>
+  <script src="js/scanner.js"></script>
+  <script src="js/print.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
